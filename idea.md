@@ -1234,3 +1234,6 @@ Giao diện có thuận tiện khi thi thật không.
 Có thể thêm metric mới nhanh không.
 Có thể thêm task mới mà không sửa nhiều code không.
 Có thể thêm worker mới khi lượng job tăng không.
+
+----bổ sung thêm sau khi đã làm xong----
+làm UI để code luôn trên web, rồi từ server web kết nối đến server GPU để thực thi, không cho thí sinh can thiệp và môi trường
