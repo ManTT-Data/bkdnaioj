@@ -1,0 +1,927 @@
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{amsmath}
+\usepackage{setspace}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue
+}
+
+\setstretch{1.08}
+\setlist[itemize]{leftmargin=1.5em}
+\setlist[enumerate]{leftmargin=1.8em}
+
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.6em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection.}{0.6em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries}{\thesubsubsection.}{0.6em}{}
+
+\title{\textbf{Database Design Specification}\\[4pt]
+for an AI Contest Management, Judging, and Practice Platform}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document presents a detailed database specification for a web-based platform designed to support AI contests, virtual contests, and post-contest practice. The schema is intentionally centered around \textit{contest entries} rather than directly around teams, because a contest participant can be an individual or a team, and the same user may participate in multiple teams with different lineups across contests. The design also supports multiple tasks per contest, multiple phases per task, asynchronous evaluation jobs, official/virtual/practice modes, communication between contestants and organizers, and current leaderboard views for both task-level and contest-level ranking.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Purpose of the Database}
+The goal of this database is to serve as the \textbf{system of record} for an AI competition platform. The platform must support:
+\begin{itemize}
+    \item official contests,
+    \item virtual replays of past contests,
+    \item post-contest practice submissions,
+    \item individual participation and team participation,
+    \item dynamic team lineups per contest,
+    \item multiple tasks inside one contest,
+    \item multiple phases for each task, such as public test, private test, final public, and final private,
+    \item submission upload, validation, judging, and rejudging,
+    \item task-level and contest-level leaderboards,
+    \item announcements, clarification requests, and technical tickets.
+\end{itemize}
+
+This design favors clarity, maintainability, and practical implementation over premature generalization.
+
+\section{Technology Choice: SQL, NoSQL, or Hybrid}
+\subsection{Recommended Architecture}
+The recommended architecture is:
+\begin{itemize}
+    \item \textbf{PostgreSQL} as the primary relational database,
+    \item \textbf{JSONB} fields inside PostgreSQL for flexible configuration and structured payloads,
+    \item \textbf{Redis} for caching, queues, and short-lived operational data,
+    \item \textbf{MinIO or S3-compatible object storage} for uploaded files, ZIP archives, logs, and large artifacts.
+\end{itemize}
+
+\subsection{Why PostgreSQL Should Be the Core}
+This platform contains many strongly related entities:
+\begin{itemize}
+    \item users, teams, and memberships,
+    \item contests, tasks, and phases,
+    \item contest entries and lineups,
+    \item submissions and judging jobs,
+    \item leaderboard rows tied to contest entries,
+    \item clarification and ticket flows tied to contest participation.
+\end{itemize}
+
+These entities require:
+\begin{itemize}
+    \item foreign keys,
+    \item uniqueness constraints,
+    \item transactional consistency,
+    \item predictable joins,
+    \item strong integrity guarantees.
+\end{itemize}
+
+These are exactly the strengths of a relational database.
+
+\subsection{Why Not Use NoSQL as the Main Database}
+A NoSQL-first design would make some flexible fields easier to store, but it would complicate:
+\begin{itemize}
+    \item enforcing one source of truth for contest participation,
+    \item guaranteeing one active lineup per contest entry,
+    \item maintaining leaderboard consistency,
+    \item querying official versus virtual participation,
+    \item joining user/team/entry/submission/leaderboard data.
+\end{itemize}
+
+Therefore, NoSQL is not recommended as the primary database for this project.
+
+\subsection{Why a Hybrid Approach Is Best}
+A hybrid design gives the best balance:
+\begin{itemize}
+    \item PostgreSQL stores structured and relational domain data,
+    \item JSONB stores flexible configuration and result payloads,
+    \item Redis handles operational speed concerns,
+    \item object storage handles large files outside the relational database.
+\end{itemize}
+
+\section{Core Design Principles}
+The schema is built on the following principles:
+
+\subsection{Contest-Centric but Entry-Driven}
+The most important design decision is that the database is \textbf{not centered directly on team IDs}. Instead, it is centered on \textbf{contest entries}. A contest entry is the actual participant in a specific contest. It may represent:
+\begin{itemize}
+    \item one individual participant,
+    \item or one team with a contest-specific lineup.
+\end{itemize}
+
+This makes the model much cleaner for:
+\begin{itemize}
+    \item official contests,
+    \item virtual contests,
+    \item practice mode,
+    \item lineups that vary across contests,
+    \item users belonging to multiple teams.
+\end{itemize}
+
+\subsection{Task-Phase Separation}
+Each contest can contain multiple tasks, and each task can contain multiple phases. This supports workflows such as:
+\begin{itemize}
+    \item public test,
+    \item private test,
+    \item final public,
+    \item final private.
+\end{itemize}
+
+Each phase can have its own judging logic, submission limit, leaderboard visibility, and availability for official/virtual/practice modes.
+
+\subsection{One Final Score Per Submission in V1}
+For the first version, each submission stores one final score:
+\begin{itemize}
+    \item a raw score used for ranking,
+    \item a display score shown in the UI,
+    \item an optional JSON breakdown for debugging or future reporting.
+\end{itemize}
+
+This keeps the system simple while remaining flexible enough for AI contests.
+
+\subsection{Split Leaderboards by Scope}
+Instead of forcing task-scoped and contest-scoped ranking into one generic structure, the database uses:
+\begin{itemize}
+    \item one table for task-phase leaderboard rows,
+    \item one table for contest-phase leaderboard rows.
+\end{itemize}
+
+This makes the leaderboard model easier to reason about and avoids a weak abstraction based on free-form board identifiers.
+
+\subsection{Flexible Metadata with JSONB}
+Fields that can vary by contest or by judging logic are stored as JSONB:
+\begin{itemize}
+    \item contest rules,
+    \item task submission schema,
+    \item submission validation result,
+    \item submission score payload,
+    \item leaderboard score breakdown.
+\end{itemize}
+
+\section{High-Level Entity Relationship View}
+The main relationships are:
+
+\begin{itemize}
+    \item A \textbf{user} can belong to multiple teams.
+    \item A \textbf{team} can contain multiple users.
+    \item A \textbf{contest} contains multiple tasks.
+    \item A \textbf{task} contains multiple phases.
+    \item A \textbf{contest entry} belongs to exactly one contest.
+    \item A \textbf{contest entry} represents either one user or one team.
+    \item A \textbf{contest entry} has one lineup through contest\_entry\_members.
+    \item A \textbf{submission} belongs to one contest entry, one task, and one phase.
+    \item A \textbf{submission} can have one or more stored uploaded files.
+    \item A \textbf{submission} can generate one or more evaluation jobs.
+    \item A \textbf{task-phase leaderboard entry} belongs to one contest entry, one task, and one real task phase.
+    \item A \textbf{contest-phase leaderboard entry} belongs to one contest entry and one logical contest phase definition.
+\end{itemize}
+
+\section{Detailed Table Specification}
+
+\subsection{Table 1: users}
+\textbf{Purpose:} stores user accounts in the system.
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+id & UUID, PK & Internal primary key for the user. \\
+email & VARCHAR, UNIQUE & Login email address. Must be unique. \\
+password\_hash & VARCHAR & Hashed password. Never store plaintext passwords. \\
+full\_name & VARCHAR & User's display name. \\
+role & ENUM/VARCHAR & Role in the platform: contestant, jury, or admin. \\
+student\_id & VARCHAR, NULL & Student identifier if the institution needs it. \\
+avatar\_url & VARCHAR, NULL & Optional profile image URL. \\
+last\_visit & TIMESTAMPTZ, NULL & Last known activity timestamp. \\
+created\_at & TIMESTAMPTZ & Creation time. \\
+updated\_at & TIMESTAMPTZ & Last update time. \\
+\bottomrule
+\end{longtable}
+
+\textbf{Notes:}
+\begin{itemize}
+    \item The role belongs to the platform, not necessarily to a team.
+    \item A contestant may later become jury or admin without changing their identity record.
+\end{itemize}
+
+\subsection{Table 2: teams}
+\textbf{Purpose:} stores global teams, not tied directly to a specific contest.
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+id & UUID, PK & Team primary key. \\
+slug & VARCHAR, UNIQUE & Short readable identifier for URLs and references. \\
+name & VARCHAR & Human-readable team name. \\
+owner\_id & UUID, FK users(id) & Team creator or owner. \\
+created\_at & TIMESTAMPTZ & Creation time. \\
+updated\_at & TIMESTAMPTZ & Last update time. \\
+\bottomrule
+\end{longtable}
+
+\textbf{Notes:}
+\begin{itemize}
+    \item The same team can participate in multiple contests.
+    \item Team composition may exist globally, but contest-specific lineups are handled separately.
+\end{itemize}
+
+\subsection{Table 3: team\_members}
+\textbf{Purpose:} stores the many-to-many relation between users and teams.
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+team\_id & UUID, FK teams(id) & Team identifier. \\
+user\_id & UUID, FK users(id) & User identifier. \\
+role & ENUM/VARCHAR & Team role such as owner, manager, or member. \\
+joined\_at & TIMESTAMPTZ & When the user joined the team. \\
+\bottomrule
+\end{longtable}
+
+\textbf{Primary key:} \texttt{(team\_id, user\_id)}
+
+\textbf{Notes:}
+\begin{itemize}
+    \item One user may belong to many teams.
+    \item One team may contain many users.
+\end{itemize}
+
+\subsection{Table 4: contests}
+\textbf{Purpose:} stores one contest event.
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+id & UUID, PK & Contest primary key. \\
+slug & VARCHAR, UNIQUE & Human-readable contest code for URLs. \\
+title & VARCHAR & Contest title. \\
+description & TEXT & Contest description. \\
+banner\_url & VARCHAR, NULL & Optional banner or poster URL. \\
+status & ENUM/VARCHAR & Lifecycle state: draft, registration\_open, running, ended, archived. \\
+entry\_policy & ENUM/VARCHAR & Whether the contest allows individual entries, team entries, or both. \\
+registration\_start & TIMESTAMPTZ & Registration opening time. \\
+registration\_end & TIMESTAMPTZ & Registration closing time. \\
+start\_time & TIMESTAMPTZ & Official contest start time. \\
+end\_time & TIMESTAMPTZ & Official contest end time. \\
+visibility & ENUM/VARCHAR & Public or private contest visibility. \\
+rules\_json & JSONB & Flexible contest rules configuration. \\
+created\_by & UUID, FK users(id) & Contest creator. \\
+max\_team\_size & INTEGER & Maximum allowed lineup size for team entries. \\
+require\_approval & BOOLEAN & Whether entry approval is required. \\
+created\_at & TIMESTAMPTZ & Creation time. \\
+updated\_at & TIMESTAMPTZ & Update time. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Table 5: tasks}
+\textbf{Purpose:} stores contest tasks. A contest may contain one or multiple tasks.
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+id & UUID, PK & Task primary key. \\
+contest\_id & UUID, FK contests(id) & Parent contest. \\
+slug & VARCHAR & Short task identifier, unique within a contest. \\
+title & VARCHAR & Task title. \\
+description & TEXT & Task summary. \\
+problem\_statement\_url & VARCHAR, NULL & Link to statement or PDF. \\
+submission\_schema & JSONB & Definition of expected uploaded structure. \\
+score\_label & VARCHAR & UI label for the score, e.g., Score, Accuracy, MAPE. \\
+higher\_is\_better & BOOLEAN & Whether larger scores rank higher. \\
+sort\_order & INTEGER & Display order inside the contest. \\
+created\_at & TIMESTAMPTZ & Creation time. \\
+updated\_at & TIMESTAMPTZ & Update time. \\
+\bottomrule
+\end{longtable}
+
+\textbf{Recommended uniqueness:} \texttt{UNIQUE(contest\_id, slug)}
+
+\subsection{Table 6: contest\_phase\_defs}
+\textbf{Purpose:} stores logical contest-wide phase definitions such as \texttt{public\_test}, \texttt{final\_public}, \texttt{private\_test}, and \texttt{final\_private}.
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+id & UUID, PK & Contest-phase definition primary key. \\
+contest\_id & UUID, FK contests(id) & Parent contest. \\
+key & ENUM/VARCHAR & Stable logical key such as \texttt{public\_test} or \texttt{final\_private}. \\
+title & VARCHAR & Human-readable title shown in UI. \\
+sort\_order & INTEGER & Display order among contest-level phase tabs. \\
+\bottomrule
+\end{longtable}
+
+\textbf{Required uniqueness:} \texttt{UNIQUE(contest\_id, key)}
+
+\textbf{Design note:}\\
+This table is the source of truth for logical phase identities used consistently across tasks and contest-level leaderboards. Typical values are:
+\begin{itemize}
+    \item \texttt{public\_test}
+    \item \texttt{final\_public}
+    \item \texttt{private\_test}
+    \item \texttt{final\_private}
+\end{itemize}
+
+For V1, each contest is expected to define exactly these four logical phase definitions. This completeness rule is best enforced in application or service-layer logic when creating or publishing the contest.
+
+\subsection{Table 7: phases}
+\textbf{Purpose:} stores real task-specific phases. Each phase belongs to one task and maps to one logical contest phase definition.
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+id & UUID, PK & Phase primary key. \\
+task\_id & UUID, FK tasks(id) & Parent task. \\
+contest\_phase\_def\_id & UUID, FK contest\_phase\_defs(id) & Logical contest-phase identity for this task phase. \\
+slug & VARCHAR & Short phase identifier. \\
+title & VARCHAR & Human-readable phase name. \\
+description & TEXT, NULL & Optional explanation of the phase. \\
+open\_time & TIMESTAMPTZ & Phase opening time. \\
+close\_time & TIMESTAMPTZ & Phase closing time. \\
+judge\_key & VARCHAR & Key that maps to the judging script for this phase. \\
+submission\_limit & INTEGER, NULL & Maximum number of allowed submissions. \\
+leaderboard\_mode & ENUM/VARCHAR & Ranking mode, for example best or latest. \\
+allow\_official\_submit & BOOLEAN & Whether official entries may submit. \\
+allow\_virtual\_submit & BOOLEAN & Whether virtual entries may submit. \\
+allow\_practice\_submit & BOOLEAN & Whether practice entries may submit. \\
+display\_scores & BOOLEAN & Whether scores are visible to contestants. \\
+is\_frozen & BOOLEAN & Whether the task-phase leaderboard is frozen. \\
+is\_final & BOOLEAN & Whether this phase is considered a final-model or final-result phase. \\
+sort\_order & INTEGER & Display order inside the task. \\
+created\_at & TIMESTAMPTZ & Creation time. \\
+updated\_at & TIMESTAMPTZ & Update time. \\
+\bottomrule
+\end{longtable}
+
+\textbf{Required uniqueness:}
+\begin{itemize}
+    \item \texttt{UNIQUE(task\_id, slug)}
+    \item \texttt{UNIQUE(task\_id, contest\_phase\_def\_id)}
+    \item \texttt{UNIQUE(id, task\_id)} to support composite foreign keys from child tables
+\end{itemize}
+
+\textbf{V1 rule:}\\
+Each task is expected to instantiate exactly one phase for each contest-wide phase definition. In other words, if a contest defines \texttt{public\_test}, \texttt{private\_test}, \texttt{final\_public}, and \texttt{final\_private}, then every task should have exactly four corresponding rows in \texttt{phases}. The uniqueness constraint above prevents duplicates, while the completeness rule is best enforced in application or service-layer logic.
+
+\textbf{Interpretation of judge\_key:}\\
+This is not a metric. It is the identifier of the judging script for that task-specific phase. For example:
+\begin{itemize}
+    \item \texttt{task1\_public\_test}
+    \item \texttt{task1\_final\_public}
+    \item \texttt{task2\_private\_test}
+\end{itemize}
+
+\subsection{Table 8: contest\_entries}
+\textbf{Purpose:} stores actual participants in a contest.
+
+A contest entry is the unit that competes. It may be:
+\begin{itemize}
+    \item one individual,
+    \item or one team.
+\end{itemize}
+
+It may also be in one of three modes:
+\begin{itemize}
+    \item official,
+    \item virtual,
+    \item practice.
+\end{itemize}
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+id & UUID, PK & Contest entry primary key. \\
+contest\_id & UUID, FK contests(id) & Parent contest. \\
+entry\_type & ENUM/VARCHAR & individual or team. \\
+entry\_mode & ENUM/VARCHAR & official, virtual, or practice. \\
+user\_id & UUID, NULL, FK users(id) & Used when the entry is individual. \\
+team\_id & UUID, NULL, FK teams(id) & Used when the entry is team-based. \\
+display\_name & VARCHAR & Name shown in leaderboards. \\
+status & ENUM/VARCHAR & pending, approved, active, disqualified, finished. \\
+registered\_by & UUID, FK users(id) & Who created the entry. \\
+approved\_by & UUID, NULL, FK users(id) & Approver if approval is required. \\
+approved\_at & TIMESTAMPTZ, NULL & Approval timestamp. \\
+start\_at & TIMESTAMPTZ, NULL & Used for virtual mode start time. \\
+end\_at & TIMESTAMPTZ, NULL & Used for virtual mode end time. \\
+created\_at & TIMESTAMPTZ & Creation time. \\
+updated\_at & TIMESTAMPTZ & Update time. \\
+\bottomrule
+\end{longtable}
+
+\textbf{Design note:}
+This table replaces the older idea of attaching submissions directly to teams.
+
+\textbf{Required integrity rules:}
+\begin{itemize}
+    \item Exactly one of \texttt{user\_id} or \texttt{team\_id} must be present.
+    \item If \texttt{entry\_type = individual}, then \texttt{user\_id} must be non-null and \texttt{team\_id} must be null.
+    \item If \texttt{entry\_type = team}, then \texttt{team\_id} must be non-null and \texttt{user\_id} must be null.
+    \item If \texttt{entry\_mode = virtual}, then \texttt{start\_at} and \texttt{end\_at} should both be non-null and must satisfy \texttt{start\_at < end\_at}.
+    \item For \texttt{official} and \texttt{practice} entries, \texttt{start\_at} and \texttt{end\_at} are usually null.
+\end{itemize}
+
+\textbf{Recommended uniqueness:}
+\begin{itemize}
+    \item At minimum, prevent duplicate individual entries in the same mode with \texttt{UNIQUE(contest\_id, entry\_mode, user\_id)} where \texttt{user\_id IS NOT NULL}.
+    \item Prevent duplicate team entries in the same mode with \texttt{UNIQUE(contest\_id, entry\_mode, team\_id)} where \texttt{team\_id IS NOT NULL}.
+\end{itemize}
+
+\subsection{Table 9: contest\_entry\_members}
+\textbf{Purpose:} stores the lineup of a contest entry.
+
+This is especially important for team entries because a global team may have many members, but only a subset may participate in a given contest.
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+contest\_entry\_id & UUID, FK contest\_entries(id) & Parent contest entry. \\
+user\_id & UUID, FK users(id) & Participating user. \\
+role & ENUM/VARCHAR & leader or member for this lineup. \\
+joined\_at & TIMESTAMPTZ & When this user was attached to the contest entry. \\
+\bottomrule
+\end{longtable}
+
+\textbf{Primary key:} \texttt{(contest\_entry\_id, user\_id)}
+
+\textbf{Required design clarification:}
+\begin{itemize}
+    \item If the parent entry is \texttt{individual}, the table should contain exactly one member row and that member should be the same as \texttt{contest\_entries.user\_id}.
+    \item If the parent entry is \texttt{team}, every member listed here should be a valid member of the referenced global team, unless the platform explicitly treats contest lineups as independent snapshots.
+    \item A rule such as ``one user may not join two official entries in the same contest'' is best treated as application-level validation in V1 because the required uniqueness spans parent and child tables and depends on \texttt{entry\_mode}.
+\end{itemize}
+
+\subsection{Table 10: submissions}
+\textbf{Purpose:} stores every submission attempt.
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+id & UUID, PK & Submission primary key. \\
+contest\_id & UUID, FK contests(id) & Explicit contest scope used to enforce cross-table consistency. \\
+contest\_entry\_id & UUID, FK contest\_entries(id) & Who submitted for the contest. \\
+task\_id & UUID, FK tasks(id) & Target task. \\
+phase\_id & UUID, FK phases(id) & Target phase. \\
+submitted\_by & UUID, FK users(id) & User who actually initiated the submission. In V1 this is assumed to be a member of the contest entry lineup. \\
+status & ENUM/VARCHAR & uploaded, validating, queued, running, done, failed. \\
+submitted\_at & TIMESTAMPTZ & Submission timestamp. \\
+file\_count & INTEGER & Number of uploaded files linked to this submission. \\
+total\_size\_bytes & BIGINT & Total uploaded size. \\
+manifest\_hash & VARCHAR, NULL & Hash describing submission content structure. \\
+validation\_result & JSONB, NULL & Validation details, including schema mismatches if any. \\
+error\_message & TEXT, NULL & Human-readable failure reason. \\
+raw\_score & NUMERIC, NULL & Internal score used for ranking. \\
+display\_score & NUMERIC, NULL & Formatted score for UI display. \\
+score\_payload & JSONB, NULL & Optional breakdown or structured evaluator output. \\
+evaluated\_at & TIMESTAMPTZ, NULL & Evaluation completion time. \\
+is\_final & BOOLEAN & Marks a final submission if the contest uses that rule. \\
+rejudge\_count & INTEGER & How many times the submission has been rejudged. \\
+client\_ip & VARCHAR, NULL & Request IP. \\
+user\_agent & VARCHAR, NULL & Client user agent. \\
+created\_at & TIMESTAMPTZ & Creation time. \\
+updated\_at & TIMESTAMPTZ & Update time. \\
+\bottomrule
+\end{longtable}
+
+\textbf{Important note:}\\
+For V1, one submission stores one final score. This is intentional and sufficient for a Kaggle-like public display of score and rank.
+
+\textbf{Required integrity rules:}
+\begin{itemize}
+    \item The parent \texttt{contest\_entry} and the target \texttt{task} must belong to the same contest.
+    \item The target \texttt{phase} must belong to the selected \texttt{task}.
+    \item In V1, the \texttt{submitted\_by} user must belong to the submitting entry's active lineup.
+\end{itemize}
+
+\textbf{Required relational mechanism:}
+\begin{itemize}
+    \item Add \texttt{UNIQUE(id, contest\_id)} on \texttt{contest\_entries}.
+    \item Add \texttt{UNIQUE(id, contest\_id)} on \texttt{tasks}.
+    \item Add \texttt{UNIQUE(id, task\_id)} on \texttt{phases}.
+    \item Enforce \texttt{FK(contest\_entry\_id, contest\_id) -> contest\_entries(id, contest\_id)}.
+    \item Enforce \texttt{FK(task\_id, contest\_id) -> tasks(id, contest\_id)}.
+    \item Enforce \texttt{FK(phase\_id, task\_id) -> phases(id, task\_id)}.
+    \item Enforce \texttt{FK(contest\_entry\_id, submitted\_by) -> contest\_entry\_members(contest\_entry\_id, user\_id)}.
+\end{itemize}
+
+\subsection{Table 11: submission\_files}
+\textbf{Purpose:} stores uploaded files that belong to a submission.
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+id & UUID, PK & File row identifier. \\
+submission\_id & UUID, FK submissions(id) & Parent submission. \\
+original\_filename & VARCHAR & Original filename uploaded by the user. \\
+storage\_path & VARCHAR & Object key or storage path in MinIO/S3/local storage. \\
+file\_size & BIGINT & File size in bytes. \\
+content\_type & VARCHAR, NULL & MIME type if known. \\
+hash\_sha256 & VARCHAR, NULL & File integrity hash. \\
+created\_at & TIMESTAMPTZ & Creation time. \\
+\bottomrule
+\end{longtable}
+
+\textbf{Design note:}
+\begin{itemize}
+    \item In V1, this table is intentionally minimal and can be used simply for the main uploaded artifact.
+    \item It does not need to store every extracted file inside a ZIP archive.
+\end{itemize}
+
+\subsection{Table 12: evaluation\_jobs}
+\textbf{Purpose:} stores asynchronous evaluation pipeline jobs.
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+id & UUID, PK & Job identifier. \\
+submission\_id & UUID, FK submissions(id) & Submission being processed. \\
+job\_type & ENUM/VARCHAR & validate, judge, or rejudge. \\
+status & ENUM/VARCHAR & pending, running, done, failed. \\
+priority & INTEGER & Relative scheduling priority. \\
+worker\_id & VARCHAR, NULL & Worker identifier that processed the job. \\
+attempt\_count & INTEGER & Retry count. \\
+max\_attempts & INTEGER & Maximum allowed retries. \\
+input\_data & JSONB, NULL & Structured input metadata for the worker. \\
+output\_data & JSONB, NULL & Structured output payload from the worker. \\
+started\_at & TIMESTAMPTZ, NULL & Start time. \\
+completed\_at & TIMESTAMPTZ, NULL & Completion time. \\
+execution\_time\_ms & INTEGER, NULL & Runtime in milliseconds. \\
+error\_log & TEXT, NULL & Internal error detail. \\
+celery\_task\_id & VARCHAR, NULL & Background queue task identifier if Celery is used. \\
+created\_at & TIMESTAMPTZ & Creation time. \\
+\bottomrule
+\end{longtable}
+
+\textbf{Design decision:}\\
+This table intentionally does not store \texttt{phase\_id} as a separate column. The evaluation phase is derived from the referenced submission, which avoids denormalization drift.
+
+\subsection{Table 13: task\_phase\_leaderboard\_entries}
+\textbf{Purpose:} stores current leaderboard rows for one task at one real task phase.
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+id & UUID, PK & Task-phase leaderboard row identifier. \\
+contest\_id & UUID, FK contests(id) & Contest identifier. \\
+task\_id & UUID, FK tasks(id) & Ranked task. \\
+phase\_id & UUID, FK phases(id) & Ranked task-specific phase. \\
+contest\_entry\_id & UUID, FK contest\_entries(id) & Ranked contest entry. \\
+rank & INTEGER & Rank position. \\
+score & NUMERIC & Displayed ranking score. \\
+score\_breakdown & JSONB, NULL & Optional detailed subscore breakdown or cached UI payload. \\
+chosen\_submission\_id & UUID, NULL, FK submissions(id) & Submission currently used for ranking. \\
+entries\_count & INTEGER & Number of submissions considered for this entry in this board. \\
+is\_frozen & BOOLEAN & Whether this row is part of a frozen board state. \\
+is\_disqualified & BOOLEAN & Whether the row is disqualified. \\
+dq\_reason & TEXT, NULL & Reason for disqualification. \\
+updated\_at & TIMESTAMPTZ & Update time. \\
+\bottomrule
+\end{longtable}
+
+\textbf{Required uniqueness:} \texttt{UNIQUE(phase\_id, contest\_entry\_id)}
+
+\textbf{Required integrity rules:}
+\begin{itemize}
+    \item The ranked \texttt{contest\_entry} must belong to the same \texttt{contest\_id} as the leaderboard row.
+    \item The selected \texttt{phase\_id} must belong to the selected \texttt{task\_id}.
+    \item If \texttt{chosen\_submission\_id} is non-null, it should belong to the same \texttt{contest\_entry}, \texttt{task\_id}, and \texttt{phase\_id} as the leaderboard row.
+\end{itemize}
+
+\subsection{Table 14: contest\_phase\_leaderboard\_entries}
+\textbf{Purpose:} stores current contest-level leaderboard rows for one logical contest phase definition.
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+id & UUID, PK & Contest-phase leaderboard row identifier. \\
+contest\_id & UUID, FK contests(id) & Contest identifier. \\
+contest\_phase\_def\_id & UUID, FK contest\_phase\_defs(id) & Ranked logical contest phase. \\
+contest\_entry\_id & UUID, FK contest\_entries(id) & Ranked contest entry. \\
+rank & INTEGER & Rank position. \\
+score & NUMERIC & Displayed aggregate ranking score. \\
+score\_breakdown & JSONB, NULL & Optional task-level breakdown or cached UI payload. \\
+entries\_count & INTEGER & Number of task submissions or task-phase results considered. \\
+is\_frozen & BOOLEAN & Whether this row is part of a frozen board state. \\
+is\_disqualified & BOOLEAN & Whether the row is disqualified. \\
+dq\_reason & TEXT, NULL & Reason for disqualification. \\
+updated\_at & TIMESTAMPTZ & Update time. \\
+\bottomrule
+\end{longtable}
+
+\textbf{Required uniqueness:} \texttt{UNIQUE(contest\_phase\_def\_id, contest\_entry\_id)}
+
+\textbf{Required integrity rules:}
+\begin{itemize}
+    \item The ranked \texttt{contest\_entry} must belong to the same \texttt{contest\_id} as the leaderboard row.
+    \item The selected \texttt{contest\_phase\_def\_id} must belong to the same \texttt{contest\_id} as the leaderboard row.
+    \item Official, virtual, and practice views are derived by joining to \texttt{contest\_entries.entry\_mode}; the leaderboard table itself does not duplicate \texttt{entry\_mode}.
+\end{itemize}
+
+\textbf{Practical UI interpretation:}
+\begin{itemize}
+    \item Official leaderboard: join to \texttt{contest\_entries} and filter \texttt{entry\_mode = official}
+    \item Virtual leaderboard: join to \texttt{contest\_entries} and filter \texttt{entry\_mode = virtual}
+    \item Practice leaderboard: join to \texttt{contest\_entries} and filter \texttt{entry\_mode = practice}
+\end{itemize}
+
+\subsection{Table 15: announcements}
+\textbf{Purpose:} stores organizer announcements.
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+id & UUID, PK & Announcement identifier. \\
+contest\_id & UUID, FK contests(id) & Parent contest. \\
+task\_id & UUID, NULL, FK tasks(id) & Optional task-specific announcement. \\
+title & VARCHAR & Title of the announcement. \\
+content & TEXT & Body content. \\
+is\_pinned & BOOLEAN & Whether this announcement is pinned. \\
+is\_public & BOOLEAN & Whether contestants can see it. \\
+created\_by & UUID, FK users(id) & Author. \\
+created\_at & TIMESTAMPTZ & Creation time. \\
+updated\_at & TIMESTAMPTZ & Update time. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Table 16: clarifications}
+\textbf{Purpose:} stores clarification requests and responses.
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+id & UUID, PK & Clarification identifier. \\
+contest\_id & UUID, FK contests(id) & Parent contest. \\
+task\_id & UUID, NULL, FK tasks(id) & Related task if applicable. \\
+phase\_id & UUID, NULL, FK phases(id) & Related phase if applicable. \\
+contest\_entry\_id & UUID, FK contest\_entries(id) & Entry that asked the question. \\
+question & TEXT & Clarification request. \\
+answer & TEXT, NULL & Organizer answer. \\
+is\_public & BOOLEAN & Whether the answer is public to all contestants. \\
+status & ENUM/VARCHAR & pending, answered, or closed. \\
+asked\_by & UUID, FK users(id) & User who asked. \\
+answered\_by & UUID, NULL, FK users(id) & User who answered. \\
+answered\_at & TIMESTAMPTZ, NULL & Answer timestamp. \\
+created\_at & TIMESTAMPTZ & Creation time. \\
+updated\_at & TIMESTAMPTZ & Update time. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Table 17: tickets}
+\textbf{Purpose:} stores technical support issues and operational complaints.
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.18\textwidth} >{\raggedright\arraybackslash}p{0.17\textwidth} >{\raggedright\arraybackslash}p{0.57\textwidth}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Meaning} \\
+\midrule
+id & UUID, PK & Ticket identifier. \\
+submission\_id & UUID, NULL, FK submissions(id) & Related submission if applicable. \\
+contest\_entry\_id & UUID, FK contest\_entries(id) & Entry that reported the issue. \\
+category & ENUM/VARCHAR & upload, judge, score, or system. \\
+subject & VARCHAR & Ticket subject. \\
+description & TEXT & Full issue description. \\
+status & ENUM/VARCHAR & open, in\_progress, resolved, rejected. \\
+priority & ENUM/VARCHAR & e.g. low, normal, high, urgent. \\
+assigned\_to & UUID, NULL, FK users(id) & Staff member handling the ticket. \\
+created\_by & UUID, FK users(id) & Reporter. \\
+created\_at & TIMESTAMPTZ & Creation time. \\
+resolved\_at & TIMESTAMPTZ, NULL & Resolution time. \\
+updated\_at & TIMESTAMPTZ & Update time. \\
+\bottomrule
+\end{longtable}
+
+\section{Important Design Decisions Explained}
+
+\subsection{Why We Use contest\_entries}
+Without \texttt{contest\_entries}, the system would need to attach submissions and leaderboard records directly to either users or teams. That approach becomes messy when:
+\begin{itemize}
+    \item a contest allows both individuals and teams,
+    \item a team has a different lineup in each contest,
+    \item a user belongs to multiple teams,
+    \item virtual and practice participation must be stored separately from official participation.
+\end{itemize}
+
+The \texttt{contest\_entries} table solves all of these in one abstraction.
+
+\subsection{Why We Store Submission Scores Directly in submissions}
+For V1, the UI only needs one final score per submission, similar to many competition platforms where contestants mostly care about rank and score. Therefore:
+\begin{itemize}
+    \item we do not need a separate \texttt{scores} table yet,
+    \item we do not need a separate \texttt{metrics} table yet,
+    \item we only store \texttt{raw\_score}, \texttt{display\_score}, and \texttt{score\_payload}.
+\end{itemize}
+
+This keeps the schema simple without preventing future extension.
+
+\subsection{Why We Split Leaderboards into Two Tables}
+The final schema intentionally uses two leaderboard tables:
+\begin{itemize}
+    \item \texttt{task\_phase\_leaderboard\_entries} for one task at one real task phase,
+    \item \texttt{contest\_phase\_leaderboard\_entries} for one contest-wide logical phase.
+\end{itemize}
+
+This is clearer than one generalized table because:
+\begin{itemize}
+    \item there is no \texttt{board\_type} column to interpret,
+    \item there is no free-form \texttt{phase\_key},
+    \item task-scoped ranking and contest-scoped ranking have different natural keys.
+\end{itemize}
+
+\subsection{Why submission\_files Is Kept Even in a Simple Version}
+Although the first version may only upload one main ZIP file or one prediction file, keeping \texttt{submission\_files} is still useful because:
+\begin{itemize}
+    \item it preserves file metadata cleanly,
+    \item it allows future multi-file submissions,
+    \item it separates file storage concerns from the submission record itself.
+\end{itemize}
+
+\section{Suggested Integrity Constraints}
+The following constraints are strongly recommended:
+
+\begin{itemize}
+    \item \texttt{users.email} must be unique.
+    \item \texttt{teams.slug} must be unique.
+    \item \texttt{contests.slug} must be unique.
+    \item \texttt{CHECK(registration\_start <= registration\_end)} on contests when both values are present.
+    \item \texttt{CHECK(start\_time < end\_time)} on contests.
+    \item \texttt{CHECK(max\_team\_size > 0)} on contests.
+    \item \texttt{UNIQUE(contest\_id, key)} on \texttt{contest\_phase\_defs}.
+    \item \texttt{UNIQUE(contest\_id, slug)} on tasks.
+    \item \texttt{UNIQUE(id, contest\_id)} on tasks.
+    \item \texttt{UNIQUE(task\_id, slug)} on phases.
+    \item \texttt{UNIQUE(task\_id, contest\_phase\_def\_id)} on phases.
+    \item \texttt{UNIQUE(id, task\_id)} on phases.
+    \item \texttt{CHECK(open\_time < close\_time)} on phases.
+    \item \texttt{CHECK(submission\_limit IS NULL OR submission\_limit >= 0)} on phases.
+    \item \texttt{PRIMARY KEY(team\_id, user\_id)} on team\_members.
+    \item \texttt{UNIQUE(id, contest\_id)} on contest\_entries.
+    \item A \texttt{CHECK} on \texttt{contest\_entries} to enforce exactly one participant source: either \texttt{user\_id} or \texttt{team\_id}.
+    \item \texttt{PRIMARY KEY(contest\_entry\_id, user\_id)} on contest\_entry\_members.
+    \item A relational consistency rule ensuring each submission references a \texttt{contest\_entry}, \texttt{task}, and \texttt{phase} from the same contest/task chain.
+    \item \texttt{FK(contest\_entry\_id, contest\_id) -> contest\_entries(id, contest\_id)} on submissions.
+    \item \texttt{FK(task\_id, contest\_id) -> tasks(id, contest\_id)} on submissions.
+    \item \texttt{FK(phase\_id, task\_id) -> phases(id, task\_id)} on submissions.
+    \item \texttt{FK(contest\_entry\_id, submitted\_by) -> contest\_entry\_members(contest\_entry\_id, user\_id)} on submissions.
+    \item \texttt{CHECK(file\_count >= 0)}, \texttt{CHECK(total\_size\_bytes >= 0)}, and \texttt{CHECK(rejudge\_count >= 0)} on submissions.
+    \item \texttt{CHECK(attempt\_count >= 0)}, \texttt{CHECK(max\_attempts >= 0)}, and \texttt{CHECK(priority >= 0)} on evaluation\_jobs.
+    \item \texttt{UNIQUE(phase\_id, contest\_entry\_id)} on \texttt{task\_phase\_leaderboard\_entries}.
+    \item \texttt{UNIQUE(contest\_phase\_def\_id, contest\_entry\_id)} on \texttt{contest\_phase\_leaderboard\_entries}.
+\end{itemize}
+
+\subsection{What Must Be Enforced by the Database}
+The following rules are strong candidates for database-level enforcement rather than only application-level validation:
+\begin{itemize}
+    \item contest entry participant exclusivity,
+    \item contest consistency between entries, tasks, phases, and submissions,
+    \item parent-child phase/task consistency,
+    \item non-negative counters and valid time ranges,
+    \item uniqueness of leaderboard rows for each task-phase scope and contest-phase scope.
+\end{itemize}
+
+\subsection{What May Remain in Application Logic in V1}
+The following rules may be validated in application code first if they are too awkward to express in pure SQL, though they should still be documented explicitly:
+\begin{itemize}
+    \item whether each contest defines exactly the required four logical phase definitions,
+    \item whether each task instantiates exactly one phase for each required contest phase definition,
+    \item whether a team-entry lineup user must already belong to the global team,
+    \item whether one user may join multiple contest entries in the same contest under special rules,
+    \item whether practice or virtual entries use different temporal submission windows beyond the base phase windows,
+    \item whether a chosen submission stored in a leaderboard row is checked purely in SQL or verified before upsert in application logic.
+\end{itemize}
+
+\section{Suggested Indexes}
+The following indexes are recommended for performance:
+
+\begin{itemize}
+    \item \texttt{users(email)}
+    \item \texttt{teams(slug)}
+    \item \texttt{contests(slug, status, start\_time, end\_time)}
+    \item \texttt{contest\_phase\_defs(contest\_id, key, sort\_order)}
+    \item \texttt{tasks(contest\_id, sort\_order)}
+    \item \texttt{phases(task\_id, open\_time, close\_time)}
+    \item \texttt{contest\_entries(contest\_id, entry\_mode, status)}
+    \item \texttt{contest\_entry\_members(contest\_entry\_id, user\_id)}
+    \item \texttt{submissions(contest\_id, contest\_entry\_id, task\_id, phase\_id, submitted\_at)}
+    \item \texttt{submissions(status)}
+    \item \texttt{evaluation\_jobs(status, created\_at)}
+    \item \texttt{task\_phase\_leaderboard\_entries(phase\_id, rank)}
+    \item \texttt{contest\_phase\_leaderboard\_entries(contest\_phase\_def\_id, rank)}
+    \item \texttt{clarifications(contest\_id, status)}
+    \item \texttt{tickets(contest\_entry\_id, status)}
+\end{itemize}
+
+\section{Operational Workflow Mapped to the Database}
+
+\subsection{Team and Contest Registration}
+\begin{enumerate}
+    \item Users exist in \texttt{users}.
+    \item Global teams are defined in \texttt{teams}.
+    \item Team membership is defined in \texttt{team\_members}.
+    \item A contestant creates a \texttt{contest\_entry}.
+    \item If the entry is team-based, its lineup is stored in \texttt{contest\_entry\_members}.
+\end{enumerate}
+
+\subsection{Submission and Judging}
+\begin{enumerate}
+    \item A contestant uploads a submission, creating a row in \texttt{submissions}.
+    \item Uploaded artifacts are recorded in \texttt{submission\_files}.
+    \item Validation and judging jobs are added to \texttt{evaluation\_jobs}.
+    \item After judging, score fields in \texttt{submissions} are updated.
+    \item Task-level leaderboard rows in \texttt{task\_phase\_leaderboard\_entries} are recomputed or updated.
+    \item Contest-level leaderboard rows in \texttt{contest\_phase\_leaderboard\_entries} are recomputed or updated.
+\end{enumerate}
+
+\subsection{Communication During Contest}
+\begin{itemize}
+    \item General notices use \texttt{announcements}.
+    \item Rule and statement questions use \texttt{clarifications}.
+    \item Technical issues and complaints use \texttt{tickets}.
+\end{itemize}
+
+\section{Future Extensions}
+This schema is intentionally suitable for V1, but it leaves room for extension:
+
+\subsection{Possible V2 Additions}
+\begin{itemize}
+    \item \texttt{audit\_logs} for full immutable change tracking,
+    \item \texttt{user\_stats\_cache} for profile summaries,
+    \item \texttt{leaderboard\_snapshots} for historical ranking snapshots,
+    \item a separate \texttt{scores} table if multi-metric public reporting becomes necessary,
+    \item a separate \texttt{evaluators} table if the platform later supports built-in and custom judge modules as first-class data.
+\end{itemize}
+
+\subsection{Why They Are Not in V1}
+They are not strictly necessary for the first functional release. The current schema already supports:
+\begin{itemize}
+    \item official contests,
+    \item virtual contests,
+    \item practice submissions,
+    \item team lineups,
+    \item asynchronous judging,
+    \item current leaderboards,
+    \item operational communication.
+\end{itemize}
+
+\section{Final Recommendation}
+The recommended production-ready database foundation for the initial version is:
+\begin{itemize}
+    \item \textbf{PostgreSQL} as the primary relational database,
+    \item \textbf{JSONB} for flexible configuration and structured payloads,
+    \item \textbf{Redis} for queueing and caching,
+    \item \textbf{MinIO/S3} for submission artifacts.
+\end{itemize}
+
+The schema should contain the following seventeen core tables:
+\begin{enumerate}
+    \item users
+    \item teams
+    \item team\_members
+    \item contests
+    \item contest\_phase\_defs
+    \item tasks
+    \item phases
+    \item contest\_entries
+    \item contest\_entry\_members
+    \item submissions
+    \item submission\_files
+    \item evaluation\_jobs
+    \item task\_phase\_leaderboard\_entries
+    \item contest\_phase\_leaderboard\_entries
+    \item announcements
+    \item clarifications
+    \item tickets
+\end{enumerate}
+
+This design is detailed enough for implementation, clean enough for maintenance, and flexible enough for future evolution into a stronger AI contest platform.
+
+\end{document}
