@@ -2,6 +2,23 @@
 node_modules/
 __pycache__/
 *.pyc
-.env
 .vscode
 .codex
+
+# Environment
+.env
+.env.local
+
+# Go
+backend/bin/
+*.exe
+*.test
+*.out
+
+# editor
+.idea/
+*.swp
+
+# build
+/tmp/
+/logs/
