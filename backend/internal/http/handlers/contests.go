@@ -203,4 +203,3 @@ func (h *ContestHandler) setStatus(c echo.Context, s db.ContestStatus) error {
 	}
 	return c.JSON(http.StatusOK, dto.ContestToResponse(contest))
 }
-
