@@ -181,6 +181,7 @@ WITH candidate AS (
     row_number() OVER (
       PARTITION BY s.contest_entry_id
       ORDER BY
+        s.is_final DESC,
         CASE WHEN $2::leaderboard_mode = 'latest' THEN s.submitted_at END DESC NULLS LAST,
         CASE WHEN $2::leaderboard_mode = 'best' AND $3 THEN s.display_score END DESC NULLS LAST,
         CASE WHEN $2::leaderboard_mode = 'best' AND NOT $3 THEN s.display_score END ASC NULLS LAST,
@@ -270,6 +271,7 @@ per_phase_choice AS (
     row_number() OVER (
       PARTITION BY s.phase_id, s.contest_entry_id
       ORDER BY
+        s.is_final DESC,
         CASE WHEN pid.leaderboard_mode = 'latest' THEN s.submitted_at END DESC NULLS LAST,
         CASE WHEN pid.leaderboard_mode = 'best' AND pid.higher_is_better THEN s.display_score END DESC NULLS LAST,
         CASE WHEN pid.leaderboard_mode = 'best' AND NOT pid.higher_is_better THEN s.display_score END ASC NULLS LAST,

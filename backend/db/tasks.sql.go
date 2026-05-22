@@ -15,7 +15,7 @@ const createTask = `-- name: CreateTask :one
 INSERT INTO tasks (
   contest_id, slug, title, description, problem_statement_url,
   submission_schema, score_label, higher_is_better, sort_order
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+) VALUES ($1, $2, $3, $4, $5, $6::varchar::jsonb, $7, $8, $9)
 RETURNING id, contest_id, slug, title, description, problem_statement_url, submission_schema, score_label, higher_is_better, sort_order, created_at, updated_at
 `
 
@@ -25,7 +25,7 @@ type CreateTaskParams struct {
 	Title               string    `json:"title"`
 	Description         *string   `json:"description"`
 	ProblemStatementUrl *string   `json:"problem_statement_url"`
-	SubmissionSchema    []byte    `json:"submission_schema"`
+	Column6             string    `json:"column_6"`
 	ScoreLabel          string    `json:"score_label"`
 	HigherIsBetter      bool      `json:"higher_is_better"`
 	SortOrder           int32     `json:"sort_order"`
@@ -38,7 +38,7 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 		arg.Title,
 		arg.Description,
 		arg.ProblemStatementUrl,
-		arg.SubmissionSchema,
+		arg.Column6,
 		arg.ScoreLabel,
 		arg.HigherIsBetter,
 		arg.SortOrder,
@@ -136,7 +136,7 @@ UPDATE tasks SET
   title = COALESCE($2, title),
   description = COALESCE($3, description),
   problem_statement_url = COALESCE($4, problem_statement_url),
-  submission_schema = COALESCE($5, submission_schema),
+  submission_schema = COALESCE($5::varchar::jsonb, submission_schema),
   score_label = COALESCE($6, score_label),
   higher_is_better = COALESCE($7, higher_is_better),
   sort_order = COALESCE($8, sort_order),
@@ -150,7 +150,7 @@ type UpdateTaskParams struct {
 	Title               *string   `json:"title"`
 	Description         *string   `json:"description"`
 	ProblemStatementUrl *string   `json:"problem_statement_url"`
-	SubmissionSchema    []byte    `json:"submission_schema"`
+	SubmissionSchema    *string   `json:"submission_schema"`
 	ScoreLabel          *string   `json:"score_label"`
 	HigherIsBetter      *bool     `json:"higher_is_better"`
 	SortOrder           *int32    `json:"sort_order"`

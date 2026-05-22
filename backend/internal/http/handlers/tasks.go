@@ -47,7 +47,7 @@ func (h *TaskHandler) Create(c echo.Context) error {
 		Title:               req.Title,
 		Description:         req.Description,
 		ProblemStatementUrl: req.ProblemStatementURL,
-		SubmissionSchema:    schema,
+		Column6:             string(schema),
 		ScoreLabel:          req.ScoreLabel,
 		HigherIsBetter:      req.HigherIsBetter,
 		SortOrder:           req.SortOrder,

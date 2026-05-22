@@ -143,6 +143,7 @@ func registerPhases(api *echo.Group, q *db.Queries, jwtMgr *security.JWTManager,
 	admin := api.Group("", mw.JWTAuth(jwtMgr), mw.RequireRole("admin"))
 	admin.POST("/tasks/:id/phases", h.Create)
 	admin.DELETE("/phases/:id", h.Delete)
+	admin.PATCH("/phases/:id", h.Update)
 	jury := api.Group("", mw.JWTAuth(jwtMgr), mw.RequireRole("admin", "jury"))
 	jury.POST("/phases/:id/freeze", h.Freeze)
 	jury.POST("/phases/:id/unfreeze", h.Unfreeze)

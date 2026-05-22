@@ -23,6 +23,7 @@ UPDATE phases SET
   submission_limit = COALESCE(sqlc.narg('submission_limit'), submission_limit),
   display_scores = COALESCE(sqlc.narg('display_scores'), display_scores),
   is_frozen = COALESCE(sqlc.narg('is_frozen'), is_frozen),
+  leaderboard_mode = COALESCE(sqlc.narg('leaderboard_mode')::leaderboard_mode, leaderboard_mode),
   updated_at = now()
 WHERE id = $1
 RETURNING *;

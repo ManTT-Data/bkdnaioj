@@ -22,7 +22,7 @@ func NewPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	// Supabase pooler (transaction mode, port 6543) does not support prepared stmts.
 	// Detect by checking if port is 6543 or host contains "pooler".
 	if strings.Contains(dsn, "pooler") || strings.Contains(dsn, ":6543") {
-		cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+		cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
 	}
 
 	cfg.MaxConns = 20

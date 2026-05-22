@@ -134,18 +134,22 @@ type CreateEvaluationSetRequest struct {
 }
 
 type EvaluationSetResponse struct {
-	ID          uuid.UUID `json:"id"`
-	TaskID      uuid.UUID `json:"task_id"`
-	Key         string    `json:"key"`
-	Title       string    `json:"title"`
-	Description *string   `json:"description,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID             uuid.UUID `json:"id"`
+	TaskID         uuid.UUID `json:"task_id"`
+	Key            string    `json:"key"`
+	Title          string    `json:"title"`
+	Description    *string   `json:"description,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	HasJudgeScript bool      `json:"has_judge_script"`
+	HasGroundTruth bool      `json:"has_ground_truth"`
+	HasInputs      bool      `json:"has_inputs"`
 }
 
 func EvaluationSetToResponse(s db.TaskEvaluationSet) EvaluationSetResponse {
 	return EvaluationSetResponse{
 		ID: s.ID, TaskID: s.TaskID, Key: string(s.Key), Title: s.Title,
 		Description: s.Description, CreatedAt: PgTimeVal(s.CreatedAt),
+		HasJudgeScript: false, HasGroundTruth: false, HasInputs: false,
 	}
 }
 

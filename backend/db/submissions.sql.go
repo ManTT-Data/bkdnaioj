@@ -256,3 +256,26 @@ func (q *Queries) MarkSubmissionQueued(ctx context.Context, arg MarkSubmissionQu
 	)
 	return i, err
 }
+
+const resetOtherFinalSubmissions = `-- name: ResetOtherFinalSubmissions :exec
+UPDATE submissions
+SET is_final = false, updated_at = now()
+WHERE contest_entry_id = $1 AND task_id = $2 AND phase_id = $3 AND id != $4
+`
+
+type ResetOtherFinalSubmissionsParams struct {
+	ContestEntryID uuid.UUID `json:"contest_entry_id"`
+	TaskID         uuid.UUID `json:"task_id"`
+	PhaseID        uuid.UUID `json:"phase_id"`
+	ID             uuid.UUID `json:"id"`
+}
+
+func (q *Queries) ResetOtherFinalSubmissions(ctx context.Context, arg ResetOtherFinalSubmissionsParams) error {
+	_, err := q.db.Exec(ctx, resetOtherFinalSubmissions,
+		arg.ContestEntryID,
+		arg.TaskID,
+		arg.PhaseID,
+		arg.ID,
+	)
+	return err
+}

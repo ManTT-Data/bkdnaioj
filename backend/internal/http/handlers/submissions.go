@@ -205,12 +205,34 @@ func (h *SubmissionHandler) MarkFinal(c echo.Context) error {
 	if err != nil {
 		return mw.ErrBadRequest("invalid submission id")
 	}
-	sub, err := h.q.MarkSubmissionFinal(c.Request().Context(), id)
+	ctx := c.Request().Context()
+	sub, err := h.q.GetSubmissionByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return mw.ErrNotFound("submission not found")
 		}
+		return mw.ErrInternal("fetch submission failed")
+	}
+
+	err = h.q.ResetOtherFinalSubmissions(ctx, db.ResetOtherFinalSubmissionsParams{
+		ContestEntryID: sub.ContestEntryID,
+		TaskID:         sub.TaskID,
+		PhaseID:        sub.PhaseID,
+		ID:             sub.ID,
+	})
+	if err != nil {
+		return mw.ErrInternal("reset other finals failed")
+	}
+
+	sub, err = h.q.MarkSubmissionFinal(ctx, id)
+	if err != nil {
 		return mw.ErrInternal("mark final failed")
 	}
+
+	if h.producer != nil {
+		_ = h.producer.EnqueueResult(ctx, sub.ID, "done")
+	}
+
 	return c.JSON(http.StatusOK, dto.SubmissionToResponse(sub))
 }
+

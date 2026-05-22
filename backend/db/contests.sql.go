@@ -20,7 +20,7 @@ INSERT INTO contests (
 ) VALUES (
   $1, $2, $3, $4, 'draft', $5,
   $6, $7, $8, $9,
-  $10, '{}'::jsonb, $11, $12, $13
+  $10, $11::varchar::jsonb, $12, $13, $14
 )
 RETURNING id, slug, title, description, banner_url, status, entry_policy, registration_start, registration_end, start_time, end_time, visibility, rules_json, created_by, max_team_size, require_approval, created_at, updated_at
 `
@@ -36,6 +36,7 @@ type CreateContestParams struct {
 	StartTime         pgtype.Timestamptz `json:"start_time"`
 	EndTime           pgtype.Timestamptz `json:"end_time"`
 	Visibility        ContestVisibility  `json:"visibility"`
+	Column11          string             `json:"column_11"`
 	CreatedBy         pgtype.UUID        `json:"created_by"`
 	MaxTeamSize       int32              `json:"max_team_size"`
 	RequireApproval   bool               `json:"require_approval"`
@@ -53,6 +54,7 @@ func (q *Queries) CreateContest(ctx context.Context, arg CreateContestParams) (C
 		arg.StartTime,
 		arg.EndTime,
 		arg.Visibility,
+		arg.Column11,
 		arg.CreatedBy,
 		arg.MaxTeamSize,
 		arg.RequireApproval,
@@ -213,7 +215,7 @@ UPDATE contests SET
   start_time = COALESCE($8, start_time),
   end_time = COALESCE($9, end_time),
   visibility = COALESCE($10::contest_visibility, visibility),
-  rules_json = COALESCE($11::jsonb, rules_json),
+  rules_json = COALESCE($11::varchar::jsonb, rules_json),
   max_team_size = COALESCE($12, max_team_size),
   require_approval = COALESCE($13, require_approval),
   updated_at = now()
@@ -232,7 +234,7 @@ type UpdateContestParams struct {
 	StartTime         pgtype.Timestamptz  `json:"start_time"`
 	EndTime           pgtype.Timestamptz  `json:"end_time"`
 	Visibility        *ContestVisibility  `json:"visibility"`
-	RulesJson         []byte              `json:"rules_json"`
+	RulesJson         *string             `json:"rules_json"`
 	MaxTeamSize       *int32              `json:"max_team_size"`
 	RequireApproval   *bool               `json:"require_approval"`
 }

@@ -1,64 +1,104 @@
-// AuthContext — JWT stored in localStorage, user decoded from token payload
-// Provides login/logout and role helpers (isAdmin, isJury) to the whole app
-import { createContext, useContext, useState, useCallback } from 'react'
-import type { ReactNode } from 'react'
-import type { User } from '@/types/api-types'
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { api, type User } from '../lib/api-client';
 
-interface AuthState {
-  token: string | null
-  user: User | null
-  login: (token: string, user: User) => void
-  logout: () => void
-  isAdmin: boolean
-  isJury: boolean
+interface AuthContextType {
+  user: User | null;
+  loading: boolean;
+  login: (payload: any) => Promise<any>;
+  register: (payload: any) => Promise<any>;
+  logout: () => void;
+  isAdmin: boolean;
+  isJury: boolean;
+  isContestant: boolean;
 }
 
-const AuthContext = createContext<AuthState | null>(null)
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const TOKEN_KEY = 'olpai_token'
-const USER_KEY  = 'olpai_user'
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(
-    () => localStorage.getItem(TOKEN_KEY),
-  )
-  const [user, setUser] = useState<User | null>(() => {
-    try { return JSON.parse(localStorage.getItem(USER_KEY) ?? 'null') }
-    catch { return null }
-  })
+  const fetchCurrentUser = async () => {
+    const token = localStorage.getItem('olpai_token');
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const u = await api.getMe();
+      setUser(u);
+    } catch (err) {
+      console.error('Failed to fetch user', err);
+      localStorage.removeItem('olpai_token');
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const login = useCallback((t: string, u: User) => {
-    localStorage.setItem(TOKEN_KEY, t)
-    localStorage.setItem(USER_KEY, JSON.stringify(u))
-    setToken(t)
-    setUser(u)
-  }, [])
+  useEffect(() => {
+    fetchCurrentUser();
+  }, []);
 
-  const logout = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY)
-    localStorage.removeItem(USER_KEY)
-    setToken(null)
-    setUser(null)
-  }, [])
+  const login = async (payload: any) => {
+    setLoading(true);
+    try {
+      const data = await api.login(payload);
+      if (data?.token?.access_token) {
+        localStorage.setItem('olpai_token', data.token.access_token);
+        setUser(data.user);
+      }
+      return data;
+    } catch (err) {
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const register = async (payload: any) => {
+    setLoading(true);
+    try {
+      const res = await api.register(payload);
+      return res;
+    } catch (err) {
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const logout = () => {
+    localStorage.removeItem('olpai_token');
+    setUser(null);
+  };
+
+  const isAdmin = user?.role === 'admin';
+  const isJury = user?.role === 'jury' || user?.role === 'admin';
+  const isContestant = user?.role === 'contestant';
 
   return (
     <AuthContext.Provider
       value={{
-        token,
         user,
+        loading,
         login,
+        register,
         logout,
-        isAdmin: user?.role === 'admin',
-        isJury:  user?.role === 'jury' || user?.role === 'admin',
+        isAdmin,
+        isJury,
+        isContestant,
       }}
     >
       {children}
     </AuthContext.Provider>
-  )
-}
+  );
+};
 
-export function useAuth(): AuthState {
-  const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error('useAuth must be used inside <AuthProvider>')
-  return ctx
-}
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};

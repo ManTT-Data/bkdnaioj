@@ -227,6 +227,7 @@ UPDATE phases SET
   submission_limit = COALESCE($7, submission_limit),
   display_scores = COALESCE($8, display_scores),
   is_frozen = COALESCE($9, is_frozen),
+  leaderboard_mode = COALESCE($10::leaderboard_mode, leaderboard_mode),
   updated_at = now()
 WHERE id = $1
 RETURNING id, task_id, contest_phase_def_id, slug, title, description, open_time, close_time, judge_key, submission_limit, leaderboard_mode, allow_official_submit, allow_virtual_submit, allow_practice_submit, display_scores, is_frozen, is_final, sort_order, created_at, updated_at, evaluation_set_id
@@ -242,6 +243,7 @@ type UpdatePhaseParams struct {
 	SubmissionLimit *int32             `json:"submission_limit"`
 	DisplayScores   *bool              `json:"display_scores"`
 	IsFrozen        *bool              `json:"is_frozen"`
+	LeaderboardMode *LeaderboardMode   `json:"leaderboard_mode"`
 }
 
 func (q *Queries) UpdatePhase(ctx context.Context, arg UpdatePhaseParams) (Phase, error) {
@@ -255,6 +257,7 @@ func (q *Queries) UpdatePhase(ctx context.Context, arg UpdatePhaseParams) (Phase
 		arg.SubmissionLimit,
 		arg.DisplayScores,
 		arg.IsFrozen,
+		arg.LeaderboardMode,
 	)
 	var i Phase
 	err := row.Scan(

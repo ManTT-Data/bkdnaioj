@@ -1,0 +1,1 @@
+document.querySelectorAll('[data-toast]').forEach(b=>b.onclick=()=>{let e=document.createElement('div');e.textContent=b.dataset.toast||'Done';e.style.cssText='position:fixed;right:24px;bottom:24px;background:#101828;color:white;padding:12px 16px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.18);z-index:99';document.body.appendChild(e);setTimeout(()=>e.remove(),2200)})

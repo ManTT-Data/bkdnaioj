@@ -37,10 +37,14 @@ func (h *ContestHandler) Create(c echo.Context) error {
 	}
 
 	uid := mw.GetUserID(c)
+	rulesJSON := json.RawMessage("{}")
 	if req.RulesJSON != nil {
 		raw := bytes.TrimSpace(*req.RulesJSON)
-		if len(raw) > 0 && string(raw) != "null" && !json.Valid(raw) {
-			return mw.ErrBadRequest("rules_json must be valid JSON")
+		if len(raw) > 0 && string(raw) != "null" {
+			if !json.Valid(raw) {
+				return mw.ErrBadRequest("rules_json must be valid JSON")
+			}
+			rulesJSON = json.RawMessage(raw)
 		}
 	}
 
@@ -55,6 +59,7 @@ func (h *ContestHandler) Create(c echo.Context) error {
 		StartTime:         dto.ToPgTimestamptzVal(req.StartTime),
 		EndTime:           dto.ToPgTimestamptzVal(req.EndTime),
 		Visibility:        db.ContestVisibility(req.Visibility),
+		Column11:          string(rulesJSON),
 		CreatedBy:         dto.ToPgUUID(uid),
 		MaxTeamSize:       req.MaxTeamSize,
 		RequireApproval:   req.RequireApproval,
@@ -130,17 +135,17 @@ func (h *ContestHandler) Update(c echo.Context) error {
 		return mw.ErrBadRequest(err.Error())
 	}
 
-	var rulesJSON json.RawMessage
+	var rulesJSON *string
 	if req.RulesJSON != nil {
 		raw := bytes.TrimSpace(*req.RulesJSON)
-		if len(raw) == 0 || string(raw) == "null" {
-			rulesJSON = json.RawMessage("{}")
-		} else {
+		value := "{}"
+		if len(raw) > 0 && string(raw) != "null" {
 			if !json.Valid(raw) {
 				return mw.ErrBadRequest("rules_json must be valid JSON")
 			}
-			rulesJSON = json.RawMessage(raw)
+			value = string(raw)
 		}
+		rulesJSON = &value
 	}
 
 	var ep *db.ContestEntryPolicy

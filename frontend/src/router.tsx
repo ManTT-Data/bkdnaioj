@@ -1,65 +1,91 @@
-// Router — full OLPAI route tree using React Router v6 createBrowserRouter
-// Two layout shells: TopNavPublicLayout (top bar) and ContestSidebarLayout (left sidebar)
-import { createBrowserRouter } from 'react-router-dom'
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { useAuth } from './contexts/auth-context';
+import { TopNavbar } from './components/navigation/top-navbar';
+import { LoginPage } from './pages/login-page';
+import { RegisterPage } from './pages/register-page';
+import { HomePage } from './pages/home-page';
+import { ContestDetailPage } from './pages/contest-detail-page';
+import { PhaseHubPage } from './pages/phase-hub-page';
+import { AdminSetupPage } from './pages/admin-setup-page';
+import { TeamsPage } from './pages/teams-page';
 
-import { TopNavPublicLayout }    from '@/layouts/top-nav-public-layout'
-import { ContestSidebarLayout }  from '@/layouts/contest-sidebar-layout'
-import { AdminSidebarLayout }    from '@/layouts/admin-sidebar-layout'
+// Layout shell wrapping pages with Navbar
+const AppLayout: React.FC = () => {
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <TopNavbar />
+      <main style={{ flex: 1 }}>
+        <Outlet />
+      </main>
+    </div>
+  );
+};
 
-import { HomePage }              from '@/pages/home-page'
-import { LoginPage }             from '@/pages/login-page'
-import { RegisterPage }          from '@/pages/register-page'
-import { NotFoundPage }          from '@/pages/not-found-page'
-import { ContestDetailPage }     from '@/pages/contests/contest-detail-page'
-import { SubmissionPage }        from '@/pages/contests/submission-page'
-import { LeaderboardPage }       from '@/pages/contests/leaderboard-page'
-import { ClarificationsPage }    from '@/pages/contests/clarifications-page'
-import { AdminJudgeQueueMonitorPage } from '@/pages/admin/admin-judge-queue-monitor-page'
-import { AdminContestSubmissionsPage } from '@/pages/admin/admin-contest-submissions-page'
-import { AdminContestParticipantsPage } from '@/pages/admin/admin-contest-participants-page'
-import { AdminContestClarificationsPage } from '@/pages/admin/admin-contest-clarifications-page'
-import { AdminContestLifecycleSettingsPage } from '@/pages/admin/admin-contest-lifecycle-settings-page'
-import { AdminCreateContestFormPage } from '@/pages/admin/admin-create-contest-form-page'
+// Route guards
+const ProtectedRoute: React.FC = () => {
+  const { user, loading } = useAuth();
 
-export const router = createBrowserRouter([
-  // Public layout — fixed top navbar
-  {
-    element: <TopNavPublicLayout />,
-    children: [
-      { path: '/',                                    element: <HomePage /> },
-      { path: '/contests/:contestId/leaderboard',     element: <LeaderboardPage /> },
-    ],
-  },
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center" style={{ minHeight: '100vh' }}>
+        <div className="spinner"></div>
+      </div>
+    );
+  }
 
-  // Contest sidebar layout — fixed left sidebar + top navbar
-  {
-    path: '/contests/:contestId',
-    element: <ContestSidebarLayout />,
-    children: [
-      { index: true,                                  element: <ContestDetailPage /> },
-      { path: 'tasks/:taskId/submit',                 element: <SubmissionPage /> },
-      { path: 'clarifications',                       element: <ClarificationsPage /> },
-    ],
-  },
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
 
-  // Admin layout — role-guarded, left sidebar only
-  {
-    path: '/admin',
-    element: <AdminSidebarLayout />,
-    children: [
-      { path: 'contests/new',                         element: <AdminCreateContestFormPage /> },
-      { path: 'contests/:contestId/judge-queue',      element: <AdminJudgeQueueMonitorPage /> },
-      { path: 'contests/:contestId/submissions',      element: <AdminContestSubmissionsPage /> },
-      { path: 'contests/:contestId/participants',     element: <AdminContestParticipantsPage /> },
-      { path: 'contests/:contestId/clarifications',   element: <AdminContestClarificationsPage /> },
-      { path: 'contests/:contestId/settings',         element: <AdminContestLifecycleSettingsPage /> },
-    ],
-  },
+  return <Outlet />;
+};
 
-  // Auth pages — no layout shell
-  { path: '/login',    element: <LoginPage /> },
-  { path: '/register', element: <RegisterPage /> },
+const AdminRoute: React.FC = () => {
+  const { user, loading, isAdmin, isJury } = useAuth();
 
-  // 404 fallback
-  { path: '*',         element: <NotFoundPage /> },
-])
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center" style={{ minHeight: '100vh' }}>
+        <div className="spinner"></div>
+      </div>
+    );
+  }
+
+  if (!user || (!isAdmin && !isJury)) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <Outlet />;
+};
+
+export const AppRouter: React.FC = () => {
+  return (
+    <BrowserRouter>
+      <Routes>
+        {/* Public / Auth routes */}
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+
+        {/* Authenticated routes with navigation shell */}
+        <Route element={<ProtectedRoute />}>
+          <Route element={<AppLayout />}>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/teams" element={<TeamsPage />} />
+            <Route path="/contests/:contestId" element={<ContestDetailPage />} />
+            <Route path="/contests/:contestId/phases/:phaseKey" element={<PhaseHubPage />} />
+
+            {/* Admin only routes */}
+            <Route element={<AdminRoute />}>
+              <Route path="/admin" element={<Navigate to="/" replace />} />
+              <Route path="/admin/contests/:contestId/setup" element={<AdminSetupPage />} />
+            </Route>
+          </Route>
+        </Route>
+
+        {/* Catch-all redirect */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
+};

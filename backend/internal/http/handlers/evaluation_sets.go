@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -25,6 +26,24 @@ type EvaluationSetHandler struct {
 
 func NewEvaluationSetHandler(q db.Querier, s3 *storage.S3) *EvaluationSetHandler {
 	return &EvaluationSetHandler{q: q, s3: s3, val: validator.New()}
+}
+
+func (h *EvaluationSetHandler) populateAssetFlags(ctx context.Context, resp *dto.EvaluationSetResponse) {
+	assets, err := h.q.ListEvaluationSetAssets(ctx, resp.ID)
+	if err != nil {
+		return
+	}
+	for _, a := range assets {
+		if a.AssetKey == "judge.py" || a.AssetKey == "judge_script" {
+			resp.HasJudgeScript = true
+		}
+		if a.AssetKey == "ground_truth.csv" || a.AssetKey == "public_ground_truth.csv" {
+			resp.HasGroundTruth = true
+		}
+		if a.AssetKey == "inputs.csv" || a.AssetKey == "public_inputs.csv" {
+			resp.HasInputs = true
+		}
+	}
 }
 
 func (h *EvaluationSetHandler) Create(c echo.Context) error {
@@ -52,7 +71,9 @@ func (h *EvaluationSetHandler) Create(c echo.Context) error {
 		}
 		return mw.ErrInternal("create evaluation set failed")
 	}
-	return c.JSON(http.StatusCreated, dto.EvaluationSetToResponse(set))
+	resp := dto.EvaluationSetToResponse(set)
+	h.populateAssetFlags(c.Request().Context(), &resp)
+	return c.JSON(http.StatusCreated, resp)
 }
 
 func (h *EvaluationSetHandler) Get(c echo.Context) error {
@@ -67,7 +88,9 @@ func (h *EvaluationSetHandler) Get(c echo.Context) error {
 		}
 		return mw.ErrInternal("fetch evaluation set failed")
 	}
-	return c.JSON(http.StatusOK, dto.EvaluationSetToResponse(set))
+	resp := dto.EvaluationSetToResponse(set)
+	h.populateAssetFlags(c.Request().Context(), &resp)
+	return c.JSON(http.StatusOK, resp)
 }
 
 func (h *EvaluationSetHandler) ListByTask(c echo.Context) error {
@@ -82,6 +105,7 @@ func (h *EvaluationSetHandler) ListByTask(c echo.Context) error {
 	resp := make([]dto.EvaluationSetResponse, len(sets))
 	for i, s := range sets {
 		resp[i] = dto.EvaluationSetToResponse(s)
+		h.populateAssetFlags(c.Request().Context(), &resp[i])
 	}
 	return c.JSON(http.StatusOK, resp)
 }

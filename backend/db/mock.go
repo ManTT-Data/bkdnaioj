@@ -76,6 +76,7 @@ type MockQuerier struct {
 	MarkSubmissionQueuedFunc              func(ctx context.Context, arg MarkSubmissionQueuedParams) (Submission, error)
 	RemoveEntryMemberFunc                 func(ctx context.Context, arg RemoveEntryMemberParams) error
 	RemoveTeamMemberFunc                  func(ctx context.Context, arg RemoveTeamMemberParams) error
+	ResetOtherFinalSubmissionsFunc        func(ctx context.Context, arg ResetOtherFinalSubmissionsParams) error
 	ResolveTicketFunc                     func(ctx context.Context, id uuid.UUID) (Ticket, error)
 	SetPhaseFrozenFunc                    func(ctx context.Context, arg SetPhaseFrozenParams) (Phase, error)
 	TouchUserLastVisitFunc                func(ctx context.Context, id uuid.UUID) error
@@ -555,6 +556,13 @@ func (m *MockQuerier) RemoveEntryMember(ctx context.Context, arg RemoveEntryMemb
 func (m *MockQuerier) RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error {
 	if m.RemoveTeamMemberFunc != nil {
 		return m.RemoveTeamMemberFunc(ctx, arg)
+	}
+	return nil
+}
+
+func (m *MockQuerier) ResetOtherFinalSubmissions(ctx context.Context, arg ResetOtherFinalSubmissionsParams) error {
+	if m.ResetOtherFinalSubmissionsFunc != nil {
+		return m.ResetOtherFinalSubmissionsFunc(ctx, arg)
 	}
 	return nil
 }

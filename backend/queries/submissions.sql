@@ -25,3 +25,9 @@ LIMIT $2 OFFSET $3;
 
 -- name: MarkSubmissionFinal :one
 UPDATE submissions SET is_final = true, updated_at = now() WHERE id = $1 RETURNING *;
+
+-- name: ResetOtherFinalSubmissions :exec
+UPDATE submissions
+SET is_final = false, updated_at = now()
+WHERE contest_entry_id = $1 AND task_id = $2 AND phase_id = $3 AND id != $4;
+

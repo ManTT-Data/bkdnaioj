@@ -74,6 +74,12 @@ func TestSubmissionHandler_ListByEntry_Success(t *testing.T) {
 func TestSubmissionHandler_MarkFinal_Success(t *testing.T) {
 	subID := uuid.New()
 	mock := &db.MockQuerier{
+		GetSubmissionByIDFunc: func(ctx context.Context, id uuid.UUID) (db.Submission, error) {
+			return db.Submission{ID: subID}, nil
+		},
+		ResetOtherFinalSubmissionsFunc: func(ctx context.Context, arg db.ResetOtherFinalSubmissionsParams) error {
+			return nil
+		},
 		MarkSubmissionFinalFunc: func(ctx context.Context, id uuid.UUID) (db.Submission, error) {
 			return db.Submission{ID: subID, IsFinal: true}, nil
 		},
@@ -90,7 +96,7 @@ func TestSubmissionHandler_MarkFinal_Success(t *testing.T) {
 
 func TestSubmissionHandler_MarkFinal_NotFound(t *testing.T) {
 	mock := &db.MockQuerier{
-		MarkSubmissionFinalFunc: func(ctx context.Context, id uuid.UUID) (db.Submission, error) {
+		GetSubmissionByIDFunc: func(ctx context.Context, id uuid.UUID) (db.Submission, error) {
 			return db.Submission{}, pgx.ErrNoRows
 		},
 	}
@@ -103,3 +109,4 @@ func TestSubmissionHandler_MarkFinal_NotFound(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, http.StatusNotFound, err.(*mw.AppError).Status)
 }
+
