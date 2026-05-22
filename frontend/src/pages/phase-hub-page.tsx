@@ -173,6 +173,7 @@ export const PhaseHubPage: React.FC = () => {
     queryKey: ['leaderboard', activePhase?.id],
     queryFn: () => api.getTaskPhaseLeaderboard(activePhase!.id),
     enabled: !!activePhase && activeTab === 'standings',
+    refetchInterval: 10000, // Poll every 10 seconds
   });
 
   // Query clarifications
@@ -187,6 +188,7 @@ export const PhaseHubPage: React.FC = () => {
     queryKey: ['overallLeaderboard', contestId, currentDef?.id],
     queryFn: () => api.getContestPhaseLeaderboard(contestId!, currentDef!.id),
     enabled: !!contestId && !!currentDef && activeTab === 'standings' && standingsMode === 'overall',
+    refetchInterval: 10000, // Poll every 10 seconds
   });
 
   // Query contestant tickets
@@ -811,21 +813,27 @@ export const PhaseHubPage: React.FC = () => {
           </div>
 
           {/* Standings Mode Switcher */}
-          <div className="flex gap-2" style={{ borderBottom: '1px solid hsl(var(--border))', padding: '0.75rem 1.5rem', backgroundColor: 'var(--background)' }}>
-            <button
-              onClick={() => setStandingsMode('task')}
-              className={`btn ${standingsMode === 'task' ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ padding: '0.3rem 0.75rem', fontSize: '0.8rem' }}
-            >
-              Task Standing ({selectedTask?.title || 'Selected Task'})
-            </button>
+          <div className="flex flex-wrap gap-2" style={{ borderBottom: '1px solid hsl(var(--border))', padding: '0.75rem 1.5rem', backgroundColor: 'var(--background)' }}>
             <button
               onClick={() => setStandingsMode('overall')}
               className={`btn ${standingsMode === 'overall' ? 'btn-primary' : 'btn-secondary'}`}
               style={{ padding: '0.3rem 0.75rem', fontSize: '0.8rem' }}
             >
-              Overall Phase Standing
+              Overall Standing
             </button>
+            {tasks.filter(t => !!taskPhasesMap[t.id]).map(t => (
+              <button
+                key={t.id}
+                onClick={() => {
+                  setSelectedTaskId(t.id);
+                  setStandingsMode('task');
+                }}
+                className={`btn ${standingsMode === 'task' && selectedTaskId === t.id ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ padding: '0.3rem 0.75rem', fontSize: '0.8rem' }}
+              >
+                {t.title}
+              </button>
+            ))}
           </div>
 
           {/* Freeze Warning */}

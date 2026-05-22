@@ -81,6 +81,8 @@ type Querier interface {
 	ListUsersAdmin(ctx context.Context, arg ListUsersAdminParams) ([]ListUsersAdminRow, error)
 	MarkSubmissionFinal(ctx context.Context, id uuid.UUID) (Submission, error)
 	MarkSubmissionQueued(ctx context.Context, arg MarkSubmissionQueuedParams) (Submission, error)
+	RecomputeContestPhaseLeaderboard(ctx context.Context, arg RecomputeContestPhaseLeaderboardParams) error
+	RecomputeTaskPhaseLeaderboard(ctx context.Context, arg RecomputeTaskPhaseLeaderboardParams) error
 	RemoveEntryMember(ctx context.Context, arg RemoveEntryMemberParams) error
 	RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error
 	ResetOtherFinalSubmissions(ctx context.Context, arg ResetOtherFinalSubmissionsParams) error

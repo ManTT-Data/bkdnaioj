@@ -69,15 +69,57 @@ func (h *LeaderboardHandler) ContestPhaseBoard(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-// POST /api/v1/phases/:phase_id/leaderboard/recompute (stub)
+// POST /api/v1/phases/:phase_id/leaderboard/recompute
 func (h *LeaderboardHandler) RecomputeTaskPhase(c echo.Context) error {
-	// Stub: actual recompute requires Redis Streams bridge (Phase 5)
-	return c.JSON(http.StatusOK, map[string]string{"status": "recompute queued (stub)"})
+	ctx := c.Request().Context()
+	phaseID, err := uuid.Parse(c.Param("phase_id"))
+	if err != nil {
+		return mw.ErrBadRequest("invalid phase id")
+	}
+
+	phase, err := h.q.GetPhaseByID(ctx, phaseID)
+	if err != nil {
+		return mw.ErrNotFound("phase not found")
+	}
+
+	task, err := h.q.GetTaskByID(ctx, phase.TaskID)
+	if err != nil {
+		return mw.ErrNotFound("task not found")
+	}
+
+	err = h.q.RecomputeTaskPhaseLeaderboard(ctx, db.RecomputeTaskPhaseLeaderboardParams{
+		PhaseID:         phaseID,
+		LeaderboardMode: phase.LeaderboardMode,
+		HigherIsBetter:  task.HigherIsBetter,
+	})
+	if err != nil {
+		return mw.ErrInternal("recompute task phase leaderboard failed")
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{"status": "success"})
 }
 
-// POST /api/v1/contests/:id/phase-defs/:def_id/leaderboard/recompute (stub)
+// POST /api/v1/contests/:id/phase-defs/:def_id/leaderboard/recompute
 func (h *LeaderboardHandler) RecomputeContestPhase(c echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]string{"status": "recompute queued (stub)"})
+	ctx := c.Request().Context()
+	contestID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return mw.ErrBadRequest("invalid contest id")
+	}
+	defID, err := uuid.Parse(c.Param("def_id"))
+	if err != nil {
+		return mw.ErrBadRequest("invalid phase def id")
+	}
+
+	err = h.q.RecomputeContestPhaseLeaderboard(ctx, db.RecomputeContestPhaseLeaderboardParams{
+		ContestPhaseDefID: defID,
+		ContestID:         contestID,
+	})
+	if err != nil {
+		return mw.ErrInternal("recompute contest phase leaderboard failed")
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{"status": "success"})
 }
 
 func parsePagination(c echo.Context) (int, int) {

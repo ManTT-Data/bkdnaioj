@@ -50,6 +50,19 @@ func (h *EntryHandler) Create(c echo.Context) error {
 	uid := mw.GetUserID(c)
 	ctx := c.Request().Context()
 
+	contest, err := h.q.GetContestByID(ctx, contestID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return mw.ErrNotFound("contest not found")
+		}
+		return mw.ErrInternal("fetch contest failed: " + err.Error())
+	}
+
+	status := db.EntryStatusApproved
+	if contest.RequireApproval {
+		status = db.EntryStatusPending
+	}
+
 	entry, err := h.q.CreateContestEntry(ctx, db.CreateContestEntryParams{
 		ContestID:    contestID,
 		EntryType:    db.EntryType(req.EntryType),
@@ -57,6 +70,7 @@ func (h *EntryHandler) Create(c echo.Context) error {
 		UserID:       dto.UUIDToPgUUID(req.UserID),
 		TeamID:       dto.UUIDToPgUUID(req.TeamID),
 		DisplayName:  req.DisplayName,
+		Status:       status,
 		RegisteredBy: uid,
 		StartAt:      dto.ToPgTimestamptz(req.StartAt),
 		EndAt:        dto.ToPgTimestamptz(req.EndAt),

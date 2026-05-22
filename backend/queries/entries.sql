@@ -2,7 +2,7 @@
 INSERT INTO contest_entries (
   contest_id, entry_type, entry_mode, user_id, team_id,
   display_name, status, registered_by, start_at, end_at
-) VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING *;
 
 -- name: GetContestEntryByID :one

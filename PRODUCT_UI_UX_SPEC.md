@@ -275,3 +275,136 @@ Minimum để gọi là “đủ dùng end-to-end”:
 
 ## 9) Notes kỹ thuật (Tailwind v4)
 - Phải dùng `@config "../tailwind.config.js";` trong `src/index.css` để custom tokens như `bg-background`, `border-border` hoạt động.
+
+---
+
+## 10) Screen specs (UI yêu cầu chi tiết theo màn hình)
+
+### 10.1 Global layout (mọi trang)
+- Topbar:
+  - Logo (link Home)
+  - Contests
+  - Nếu `role=admin`: Admin
+  - Nếu `role=jury` hoặc `role=admin`: Jury
+  - Góc phải: user chip + Sign out (hoặc Sign in/Register)
+- Nguyên tắc: từ bất kỳ trang nào cũng đi qua lại được (không dead-end).
+
+### 10.2 Home (`/`)
+Mục tiêu: “vào là hiểu làm gì” + CTA rõ.
+- Hero ngắn gọn: 1 câu mô tả flow.
+- CTA:
+  - Browse contests
+  - Nếu admin: Admin
+- Preview contests: table 5–10 items.
+
+### 10.3 Contest list (`/contests`)
+- Table-first, có search.
+- Cột: Title, Status, Start, End, Action.
+- Action:
+  - `Enter` (cho mọi user)
+  - Nếu admin: `Manage` dẫn sang `/admin/contests/:id` + `New contest` CTA.
+
+### 10.4 Contest phase chooser (`/contests/:contestId`)
+- 4 cards theo phaseKey.
+- Mỗi card hiển thị:
+  - Title
+  - Hint (final vs non-final)
+  - Open button
+
+### 10.5 Phase hub (`/contests/:contestId/phases/:phaseKey`)
+- Header: Contest title + Phase title
+- Tabs bắt buộc:
+  - Overview | Problems | Submit | Submissions | Standings | Clarifications
+
+**Problems tab**
+- Tasks table:
+  - Task title/desc
+  - Score label
+  - Submit action (link submit page)
+
+**Submit tab**
+- (Có thể redirect sang submit page theo task) hoặc list tasks với action submit.
+
+**Submissions tab**
+- Filters:
+  - Entry selector (và “Create my entry” nếu chưa có)
+  - Task selector
+- Table:
+  - When, Status, Score, Message
+- Polling: 2s cho đến khi terminal (`done|failed`).
+
+**Standings tab**
+- Hiển thị standings theo contest-phase leaderboard.
+- Cột tối thiểu: Rank, Name, Score, Updated.
+- Frozen indicator nếu phase/leaderboard đang frozen.
+
+**Clarifications tab**
+- List clarifications:
+  - Question, Answer, Status, Public/Private, timestamps
+- Create clarification:
+  - require chọn Entry
+  - optional chọn Task
+  - textarea question
+
+### 10.6 Submit page (`/contests/:contestId/phases/:phaseKey/tasks/:taskId/submit`)
+- Phase locked by URL.
+- Entry selector + create entry CTA.
+- File picker:
+  - Non-final: show requirement `predictions.csv`
+  - Final: show requirement zip (`infer.py` + `model.txt`)
+- Submit action chạy presigned flow:
+  - initiate → PUT → complete
+- UI phải hiển thị:
+  - Progress (uploading/queued/running)
+  - Submission id
+
+### 10.7 Admin contests (`/admin/contests`)
+- Table contests.
+- Actions:
+  - Edit
+  - Publish (chỉ enable khi eligible)
+  - Archive
+
+### 10.8 Admin contest edit (`/admin/contests/new`, `/admin/contests/:id`)
+- Form fields theo backend DTO.
+- Validation message rõ ràng.
+
+### 10.9 Admin contest setup (màn bắt buộc cho E2E)
+> Đây là màn “làm được contest judgeable và publish”.
+
+Route đề xuất:
+- `/admin/contests/:contestId/setup`
+
+Nội dung:
+1) Tasks section
+- Add task
+- Yêu cầu: khi add task thì **auto**:
+  - create eval sets public/private
+  - create 4 phases mapped vào 4 phase defs
+
+2) Evaluation assets section (per task, per eval set)
+- Checklist bắt buộc:
+  - judge.py
+  - ground_truth.csv
+- Action upload (presigned) ngay tại dòng thiếu.
+
+3) Publish gating summary
+- Một bảng tổng hợp theo task:
+  - Public eval assets ok?
+  - Private eval assets ok?
+- Publish button chỉ enable khi tất cả ok.
+- Khi disabled: show list “what’s missing” theo task.
+
+---
+
+## 11) Acceptance criteria (đủ dùng)
+
+### Admin E2E
+- Tạo contest → add task → upload assets cho public+private → publish thành công.
+
+### Contestant E2E
+- Register/login → create entry → chọn contest/phase/task → submit → thấy status chuyển và score khi done.
+
+### UX gates
+- Không có bước “Phase definitions missing/initialize”.
+- Không có trang dead-end: luôn có link quay lại và chuyển role flows.

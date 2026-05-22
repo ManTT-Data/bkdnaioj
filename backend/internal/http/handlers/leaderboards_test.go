@@ -74,7 +74,10 @@ func TestLeaderboardHandler_ContestPhaseBoard_Success(t *testing.T) {
 
 func TestLeaderboardHandler_RecomputeTaskPhase(t *testing.T) {
 	h := NewLeaderboardHandler(&db.MockQuerier{})
-	c, rec := newTestContext("POST", "/api/v1/phases/"+uuid.New().String()+"/leaderboard/recompute", "")
+	phaseID := uuid.New()
+	c, rec := newTestContext("POST", "/api/v1/phases/"+phaseID.String()+"/leaderboard/recompute", "")
+	c.SetParamNames("phase_id")
+	c.SetParamValues(phaseID.String())
 
 	err := h.RecomputeTaskPhase(c)
 	assert.NoError(t, err)
@@ -83,7 +86,11 @@ func TestLeaderboardHandler_RecomputeTaskPhase(t *testing.T) {
 
 func TestLeaderboardHandler_RecomputeContestPhase(t *testing.T) {
 	h := NewLeaderboardHandler(&db.MockQuerier{})
-	c, rec := newTestContext("POST", "/api/v1/contests/xxx/phase-defs/"+uuid.New().String()+"/leaderboard/recompute", "")
+	contestID := uuid.New()
+	defID := uuid.New()
+	c, rec := newTestContext("POST", "/api/v1/contests/"+contestID.String()+"/phase-defs/"+defID.String()+"/leaderboard/recompute", "")
+	c.SetParamNames("id", "def_id")
+	c.SetParamValues(contestID.String(), defID.String())
 
 	err := h.RecomputeContestPhase(c)
 	assert.NoError(t, err)

@@ -18,7 +18,54 @@ func TestEntryHandler_Create_Success(t *testing.T) {
 	entryID := uuid.New()
 
 	mock := &db.MockQuerier{
+		GetContestByIDFunc: func(ctx context.Context, id uuid.UUID) (db.Contest, error) {
+			return db.Contest{
+				ID:              contestID,
+				RequireApproval: false,
+			}, nil
+		},
 		CreateContestEntryFunc: func(ctx context.Context, arg db.CreateContestEntryParams) (db.ContestEntry, error) {
+			assert.Equal(t, db.EntryStatusApproved, arg.Status)
+			return db.ContestEntry{
+				ID:           entryID,
+				ContestID:    contestID,
+				EntryType:    db.EntryTypeIndividual,
+				EntryMode:    db.EntryModeOfficial,
+				DisplayName:  "Test Entry",
+				Status:       db.EntryStatusApproved,
+				RegisteredBy: userID,
+			}, nil
+		},
+		AddEntryMemberFunc: func(ctx context.Context, arg db.AddEntryMemberParams) error {
+			return nil
+		},
+	}
+	h := NewEntryHandler(mock)
+	body := fmt.Sprintf(`{"entry_type":"individual","user_id":"%s","display_name":"Test Entry","entry_mode":"official"}`, userID)
+	c, rec := newTestContext("POST", "/api/v1/contests/"+contestID.String()+"/entries", body)
+	c.SetParamNames("id")
+	c.SetParamValues(contestID.String())
+	setAuthContext(c, userID, "user")
+
+	err := h.Create(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, rec.Code)
+}
+
+func TestEntryHandler_Create_RequireApproval(t *testing.T) {
+	userID := uuid.New()
+	contestID := uuid.New()
+	entryID := uuid.New()
+
+	mock := &db.MockQuerier{
+		GetContestByIDFunc: func(ctx context.Context, id uuid.UUID) (db.Contest, error) {
+			return db.Contest{
+				ID:              contestID,
+				RequireApproval: true,
+			}, nil
+		},
+		CreateContestEntryFunc: func(ctx context.Context, arg db.CreateContestEntryParams) (db.ContestEntry, error) {
+			assert.Equal(t, db.EntryStatusPending, arg.Status)
 			return db.ContestEntry{
 				ID:           entryID,
 				ContestID:    contestID,

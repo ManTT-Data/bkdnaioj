@@ -37,8 +37,8 @@ export const RankingsPage: React.FC = () => {
             const phaseDefs = await api.getPhaseDefs(contest.id);
             if (phaseDefs.length === 0) return;
             
-            // Target the public_test phase def or fall back to the first defined phase
-            const targetDef = phaseDefs.find(d => d.key === 'public_test') || phaseDefs[0];
+            // Target the private_test phase def (where output is evaluated against the private dataset)
+            const targetDef = phaseDefs.find(d => d.key === 'private_test');
             if (!targetDef) return;
 
             const leaderboard = await api.getContestPhaseLeaderboard(contest.id, targetDef.id);
@@ -144,7 +144,7 @@ export const RankingsPage: React.FC = () => {
           <span className="home-banner-badge" style={{ backgroundColor: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24' }}>Bảng Xếp Hạng Hệ Thống</span>
           <h1 className="home-banner-title" style={{ fontSize: '2.25rem', marginBottom: '0.5rem' }}>Bảng Xếp Hạng Tổng</h1>
           <p className="home-banner-subtitle" style={{ fontSize: '1rem', opacity: 0.9 }}>
-            Thứ hạng danh giá của tất cả đấu thủ trên toàn bộ hệ thống tính bằng tổng điểm mọi bài tập đã vượt qua.
+            Thứ hạng danh giá của tất cả đấu thủ trên toàn bộ hệ thống tính bằng tổng điểm từ các phase Private Test.
           </p>
         </div>
         

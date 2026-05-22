@@ -94,6 +94,8 @@ type MockQuerier struct {
 	UpsertContestPhaseLeaderboardFunc     func(ctx context.Context, arg UpsertContestPhaseLeaderboardParams) (ContestPhaseLeaderboardEntry, error)
 	UpsertEvaluationSetAssetFunc          func(ctx context.Context, arg UpsertEvaluationSetAssetParams) (EvaluationSetAsset, error)
 	UpsertTaskPhaseLeaderboardFunc        func(ctx context.Context, arg UpsertTaskPhaseLeaderboardParams) (TaskPhaseLeaderboardEntry, error)
+	RecomputeTaskPhaseLeaderboardFunc     func(ctx context.Context, arg RecomputeTaskPhaseLeaderboardParams) error
+	RecomputeContestPhaseLeaderboardFunc  func(ctx context.Context, arg RecomputeContestPhaseLeaderboardParams) error
 }
 
 var _ Querier = (*MockQuerier)(nil)
@@ -684,4 +686,18 @@ func (m *MockQuerier) UpsertTaskPhaseLeaderboard(ctx context.Context, arg Upsert
 		return m.UpsertTaskPhaseLeaderboardFunc(ctx, arg)
 	}
 	return TaskPhaseLeaderboardEntry{}, nil
+}
+
+func (m *MockQuerier) RecomputeTaskPhaseLeaderboard(ctx context.Context, arg RecomputeTaskPhaseLeaderboardParams) error {
+	if m.RecomputeTaskPhaseLeaderboardFunc != nil {
+		return m.RecomputeTaskPhaseLeaderboardFunc(ctx, arg)
+	}
+	return nil
+}
+
+func (m *MockQuerier) RecomputeContestPhaseLeaderboard(ctx context.Context, arg RecomputeContestPhaseLeaderboardParams) error {
+	if m.RecomputeContestPhaseLeaderboardFunc != nil {
+		return m.RecomputeContestPhaseLeaderboardFunc(ctx, arg)
+	}
+	return nil
 }
