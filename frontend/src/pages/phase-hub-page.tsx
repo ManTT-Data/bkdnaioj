@@ -32,7 +32,19 @@ export const PhaseHubPage: React.FC = () => {
 
   const handleTabChange = (tab: typeof activeTab) => {
     setActiveTab(tab);
-    setSearchParams({ tab });
+    const nextParams: Record<string, string> = { tab };
+    const taskIdParam = searchParams.get('taskId');
+    if (tab === 'problems' && selectedTaskId) {
+      nextParams.taskId = selectedTaskId;
+    } else if (tab === 'problems' && taskIdParam) {
+      nextParams.taskId = taskIdParam;
+    }
+    setSearchParams(nextParams);
+  };
+
+  const handleTaskChange = (taskId: string) => {
+    setSelectedTaskId(taskId);
+    setSearchParams({ tab: activeTab, taskId });
   };
 
   // Standings Mode
@@ -174,12 +186,19 @@ export const PhaseHubPage: React.FC = () => {
     enabled: !!contestId,
   });
 
-  // Set default selected task
+  // Set default selected task (checking URL query parameters first)
   useEffect(() => {
-    if (tasks.length > 0 && !selectedTaskId) {
-      setSelectedTaskId(tasks[0].id);
+    if (tasks.length > 0) {
+      const taskIdParam = searchParams.get('taskId');
+      if (taskIdParam && tasks.some(t => t.id === taskIdParam)) {
+        if (selectedTaskId !== taskIdParam) {
+          setSelectedTaskId(taskIdParam);
+        }
+      } else if (!selectedTaskId) {
+        setSelectedTaskId(tasks[0].id);
+      }
     }
-  }, [tasks, selectedTaskId]);
+  }, [tasks, selectedTaskId, searchParams]);
 
   // Mutations
   const submitPredictionMutation = useMutation({
@@ -484,7 +503,7 @@ export const PhaseHubPage: React.FC = () => {
             {tasks.map(t => (
               <button
                 key={t.id}
-                onClick={() => setSelectedTaskId(t.id)}
+                onClick={() => handleTaskChange(t.id)}
                 className={`btn ${selectedTaskId === t.id ? 'btn-primary' : 'btn-secondary'}`}
                 style={{ justifyContent: 'flex-start', textAlign: 'left', width: '100%' }}
               >
@@ -550,6 +569,21 @@ export const PhaseHubPage: React.FC = () => {
                     return (
                       <div className="alert alert-danger" style={{ marginTop: '1rem' }}>
                         This phase ended at <strong>{new Date(activePhase.close_time).toLocaleString()}</strong>. Submissions are closed.
+                      </div>
+                    );
+                  }
+
+                  if (!userEntry) {
+                    return (
+                      <div className="alert alert-warning flex items-center gap-2" style={{ marginTop: '1rem' }}>
+                        <ShieldAlert size={18} />
+                        <div>
+                          <strong>Chưa đăng ký tham gia:</strong> Bạn chưa đăng ký tham gia cuộc thi này hoặc không thuộc đội thi hợp lệ. Vui lòng đăng ký tham gia trước khi nộp bài.
+                          <br />
+                          <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>
+                            <strong>Not registered:</strong> You are not registered for this contest or do not belong to a valid team. Please register first.
+                          </span>
+                        </div>
                       </div>
                     );
                   }

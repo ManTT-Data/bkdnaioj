@@ -111,7 +111,7 @@ export const HomePage: React.FC = () => {
       entry_policy: 'individual' as const,
       status: 'running' as const,
       isMock: true,
-      mode: 'ICPC style',
+      mode: 'Thi cá nhân',
       location: 'Online'
     },
     {
@@ -123,7 +123,7 @@ export const HomePage: React.FC = () => {
       entry_policy: 'team' as const,
       status: 'upcoming' as const,
       isMock: true,
-      mode: 'IOI style',
+      mode: 'Thi đồng đội',
       location: 'Onsite'
     }
   ];
@@ -357,7 +357,7 @@ export const HomePage: React.FC = () => {
           </div>
           <div>
             <div className="feature-title">Nhiều cuộc thi</div>
-            <div className="feature-desc">Đa dạng format: ICPC-style, IOI-style, và nhiều hơn nữa.</div>
+            <div className="feature-desc">Đa dạng format: thi cá nhân và đồng đội chuyên nghiệp.</div>
           </div>
         </div>
         
@@ -392,13 +392,12 @@ export const HomePage: React.FC = () => {
                   <Plus size={14} /> Tạo cuộc thi
                 </button>
               )}
-              <button 
-                onClick={() => handleScrollToSection('contests-section')}
+              <Link 
+                to="/contests"
                 className="home-section-link"
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
               >
                 Xem tất cả
-              </button>
+              </Link>
             </div>
           </div>
 
@@ -420,7 +419,11 @@ export const HomePage: React.FC = () => {
                 const isUpcoming = new Date(contest.start_time) > new Date();
                 const isEnded = new Date(contest.end_time) < new Date();
                 
-                let formatText = contest.entry_policy === 'team' ? 'ICPC style' : 'IOI style';
+                let formatText = contest.entry_policy === 'team' 
+                  ? 'Thi đồng đội' 
+                  : contest.entry_policy === 'individual' 
+                  ? 'Thi cá nhân' 
+                  : 'Cả hai';
                 if (contest.isMock) {
                   formatText = contest.mode;
                 }
@@ -450,8 +453,8 @@ export const HomePage: React.FC = () => {
                             padding: '0.15rem 0.45rem',
                             fontWeight: 600,
                             borderRadius: '4px',
-                            backgroundColor: formatText.includes('ICPC') ? '#eff6ff' : '#f0fdf4',
-                            color: formatText.includes('ICPC') ? '#2563eb' : '#16a34a',
+                            backgroundColor: formatText === 'Thi đồng đội' ? '#eff6ff' : '#f0fdf4',
+                            color: formatText === 'Thi đồng đội' ? '#2563eb' : '#16a34a',
                             border: 'none'
                           }}
                         >
@@ -522,13 +525,12 @@ export const HomePage: React.FC = () => {
               <Code2 size={18} style={{ color: '#2563eb' }} />
               Bài tập mới
             </h3>
-            <button 
-              onClick={() => handleScrollToSection('exercises-section')}
+            <Link 
+              to="/problems"
               className="home-section-link"
-              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
             >
               Xem tất cả
-            </button>
+            </Link>
           </div>
 
           <div className="exercise-list">
@@ -676,8 +678,8 @@ export const HomePage: React.FC = () => {
                   value={entryPolicy}
                   onChange={(e: any) => setEntryPolicy(e.target.value)}
                 >
-                  <option value="individual">Chỉ cá nhân (IOI style)</option>
-                  <option value="team">Chỉ đội nhóm (ICPC style)</option>
+                  <option value="individual">Chỉ cá nhân</option>
+                  <option value="team">Chỉ đội nhóm</option>
                   <option value="both">Cả hai chế độ</option>
                 </select>
               </div>

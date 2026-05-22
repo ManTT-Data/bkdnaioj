@@ -1,8 +1,6 @@
 import React from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/auth-context';
-import { useQuery } from '@tanstack/react-query';
-import { api, type Contest } from '../../lib/api-client';
 import { Code2, LogOut, User as UserIcon, Settings, Search } from 'lucide-react';
 
 export const TopNavbar: React.FC = () => {
@@ -15,53 +13,19 @@ export const TopNavbar: React.FC = () => {
     navigate('/login');
   };
 
-  // Query contests to know which contest/phase is active
-  const { data: contests = [] } = useQuery<Contest[]>({
-    queryKey: ['contests'],
-    queryFn: api.getContests,
-    enabled: !!user,
-  });
-
-  const activeContests = contests.filter(c => {
-    const start = new Date(c.start_time);
-    const end = new Date(c.end_time);
-    const now = new Date();
-    return c.status !== 'draft' && now >= start && now <= end;
-  });
-
-  const upcomingContests = contests.filter(c => {
-    const start = new Date(c.start_time);
-    const now = new Date();
-    return c.status !== 'draft' && now < start;
-  });
-
-  const targetContest = activeContests[0] || upcomingContests[0] || contests[0];
-  const activeContestId = targetContest?.id;
-
-  // Check if current page is inside a contest phase
-  const phaseMatch = pathname.match(/^\/contests\/([^/]+)\/phases\/([^/]+)/);
-
-  const getNavLink = (tabType: 'problems' | 'contests' | 'status' | 'rankings' | 'discussions') => {
-    if (phaseMatch) {
-      const cId = phaseMatch[1];
-      const pKey = phaseMatch[2];
-      if (tabType === 'problems') return `/contests/${cId}/phases/${pKey}?tab=problems`;
-      if (tabType === 'contests') return '/?scroll=contests';
-      if (tabType === 'status') return `/contests/${cId}/phases/${pKey}?tab=submissions`;
-      if (tabType === 'rankings') return `/contests/${cId}/phases/${pKey}?tab=standings`;
-      if (tabType === 'discussions') return `/contests/${cId}/phases/${pKey}?tab=clarifications`;
-    } else {
-      if (tabType === 'problems') return '/?scroll=exercises';
-      if (tabType === 'contests') return '/?scroll=contests';
-      if (activeContestId) {
-        if (tabType === 'status') return `/contests/${activeContestId}/phases/public_test?tab=submissions`;
-        if (tabType === 'rankings') return `/contests/${activeContestId}/phases/public_test?tab=standings`;
-        if (tabType === 'discussions') return `/contests/${activeContestId}/phases/public_test?tab=clarifications`;
-      } else {
-        return '/?scroll=contests';
-      }
-    }
-    return '/';
+  // Active tab helper based on pathname prefix
+  const isActive = (path: string) => {
+    return pathname.startsWith(path);
+  };
+  
+  const getLinkStyle = (path: string) => {
+    const active = isActive(path);
+    return {
+      color: active ? '#2563eb' : '#64748b',
+      fontWeight: active ? 600 : 500,
+      borderBottom: active ? '2px solid #2563eb' : 'none',
+      paddingBottom: '0.25rem'
+    };
   };
 
   return (
@@ -73,13 +37,12 @@ export const TopNavbar: React.FC = () => {
             Uni<span>OJ</span>
           </Link>
           
-          <nav className="navbar-links" style={{ gap: '1.75rem' }}>
-            <Link to={getNavLink('problems')} className="navbar-item" style={{ color: '#64748b' }}>Problems</Link>
-            <Link to={getNavLink('contests')} className="navbar-item" style={{ color: '#0f172a', fontWeight: 600 }}>Contests</Link>
-            <Link to={getNavLink('status')} className="navbar-item" style={{ color: '#64748b' }}>Status</Link>
-            <Link to={getNavLink('rankings')} className="navbar-item" style={{ color: '#64748b' }}>Rankings</Link>
-            <Link to={getNavLink('discussions')} className="navbar-item" style={{ color: '#64748b' }}>Discussions</Link>
-            <Link to="/teams" className="navbar-item" style={{ color: '#64748b' }}>Groups</Link>
+          <nav className="navbar-links" style={{ gap: '1.75rem', display: 'flex', alignItems: 'center' }}>
+            <Link to="/newsfeed" className="navbar-item" style={getLinkStyle('/newsfeed')}>Newsfeed</Link>
+            <Link to="/problems" className="navbar-item" style={getLinkStyle('/problems')}>Problems</Link>
+            <Link to="/contests" className="navbar-item" style={getLinkStyle('/contests')}>Contests</Link>
+            <Link to="/rankings" className="navbar-item" style={getLinkStyle('/rankings')}>Rankings</Link>
+            <Link to="/teams" className="navbar-item" style={getLinkStyle('/teams')}>Groups</Link>
           </nav>
         </div>
 

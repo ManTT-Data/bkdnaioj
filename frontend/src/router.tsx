@@ -9,6 +9,11 @@ import { ContestDetailPage } from './pages/contest-detail-page';
 import { PhaseHubPage } from './pages/phase-hub-page';
 import { AdminSetupPage } from './pages/admin-setup-page';
 import { TeamsPage } from './pages/teams-page';
+import { NewsfeedPage } from './pages/newsfeed-page';
+import { ProblemsPage } from './pages/problems-page';
+import { ContestsPage } from './pages/contests-page';
+import { RankingsPage } from './pages/rankings-page';
+
 
 // Layout shell wrapping pages with Navbar
 const AppLayout: React.FC = () => {
@@ -72,6 +77,10 @@ export const AppRouter: React.FC = () => {
           <Route element={<AppLayout />}>
             <Route path="/" element={<HomePage />} />
             <Route path="/teams" element={<TeamsPage />} />
+            <Route path="/newsfeed" element={<NewsfeedPage />} />
+            <Route path="/problems" element={<ProblemsPage />} />
+            <Route path="/contests" element={<ContestsPage />} />
+            <Route path="/rankings" element={<RankingsPage />} />
             <Route path="/contests/:contestId" element={<ContestDetailPage />} />
             <Route path="/contests/:contestId/phases/:phaseKey" element={<PhaseHubPage />} />
 
