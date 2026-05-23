@@ -206,6 +206,21 @@ export interface Ticket {
   resolved_at?: string | null;
 }
 
+export interface PublicStatsSummary {
+  users: number;
+  contests: number;
+  tasks: number;
+  submissions: number;
+}
+
+export interface TaskStats {
+  task_id: string;
+  solved_entries: number;
+  total_submissions: number;
+  done_submissions: number;
+  success_rate: number;
+}
+
 // API methods
 export const api = {
   // Auth
@@ -343,6 +358,8 @@ export const api = {
     user_id?: string | null;
     team_id?: string | null;
     display_name: string;
+    start_at?: string;
+    end_at?: string;
   }) {
     const res = await apiClient.post(`/contests/${contestId}/entries`, payload);
     return res.data as ContestEntry;
@@ -412,12 +429,14 @@ export const api = {
   },
 
   // Leaderboards
-  async getTaskPhaseLeaderboard(phaseId: string) {
-    const res = await apiClient.get(`/phases/${phaseId}/leaderboard`);
+  async getTaskPhaseLeaderboard(phaseId: string, entryMode?: string) {
+    const url = entryMode ? `/phases/${phaseId}/leaderboard?entry_mode=${entryMode}` : `/phases/${phaseId}/leaderboard`;
+    const res = await apiClient.get(url);
     return res.data as LeaderboardRow[];
   },
-  async getContestPhaseLeaderboard(contestId: string, defId: string) {
-    const res = await apiClient.get(`/contests/${contestId}/phase-defs/${defId}/leaderboard`);
+  async getContestPhaseLeaderboard(contestId: string, defId: string, entryMode?: string) {
+    const url = entryMode ? `/contests/${contestId}/phase-defs/${defId}/leaderboard?entry_mode=${entryMode}` : `/contests/${contestId}/phase-defs/${defId}/leaderboard`;
+    const res = await apiClient.get(url);
     return res.data as LeaderboardRow[];
   },
   async recomputeTaskPhaseLeaderboard(phaseId: string) {
@@ -427,6 +446,16 @@ export const api = {
   async recomputeContestPhaseLeaderboard(contestId: string, defId: string) {
     const res = await apiClient.post(`/contests/${contestId}/phase-defs/${defId}/leaderboard/recompute`);
     return res.data;
+  },
+
+  // Public stats
+  async getPublicStatsSummary() {
+    const res = await apiClient.get('/stats/summary');
+    return res.data as PublicStatsSummary;
+  },
+  async getTaskStats() {
+    const res = await apiClient.get('/stats/tasks');
+    return res.data as TaskStats[];
   },
 
   // Admin stats

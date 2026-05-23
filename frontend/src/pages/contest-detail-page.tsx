@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, type Contest, type PhaseDef, type ContestEntry, type EntryMember, type Team, type Announcement, type Task, type Phase } from '../lib/api-client';
@@ -54,13 +54,23 @@ export const ContestDetailPage: React.FC = () => {
   });
 
   // Check user registration status
-  const userEntry = entries.find(
+  const userEntries = entries.filter(
     e => e.user_id === user?.id || 
          e.registered_by === user?.id || 
          (e.team_id && myTeams.some(t => t.id === e.team_id))
   );
-  const isRegistered = !!userEntry;
-  const isApproved = userEntry?.status === 'approved' || userEntry?.status === 'active' || userEntry?.status === 'finished';
+  const approvedEntries = userEntries.filter(
+    e => e.status === 'approved' || e.status === 'active' || e.status === 'finished'
+  );
+  const isRegistered = userEntries.length > 0;
+
+  useEffect(() => {
+    const regModes = userEntries.map(e => e.entry_mode);
+    const availModes = (['official', 'virtual', 'practice'] as const).filter(m => !regModes.includes(m));
+    if (availModes.length > 0 && !availModes.includes(selectedEntryMode)) {
+      setSelectedEntryMode(availModes[0]);
+    }
+  }, [userEntries]);
 
   // Load announcements
   const { data: announcements = [], isLoading: loadingAnnouncements } = useQuery<Announcement[]>({
@@ -71,6 +81,8 @@ export const ContestDetailPage: React.FC = () => {
 
   // Registration UI Form State
   const [selectedRegType, setSelectedRegType] = useState<'individual' | 'team'>('individual');
+  const [selectedEntryMode, setSelectedEntryMode] = useState<'official' | 'virtual' | 'practice'>('official');
+  const [showRegFormForce, setShowRegFormForce] = useState(false);
   const [selectedTeamId, setSelectedTeamId] = useState('');
   const [customDisplayName, setCustomDisplayName] = useState('');
   const [showCreateTeamInline, setShowCreateTeamInline] = useState(false);
@@ -102,10 +114,13 @@ export const ContestDetailPage: React.FC = () => {
       user_id?: string | null;
       team_id?: string | null;
       display_name: string;
+      start_at?: string;
+      end_at?: string;
     }) => api.createEntry(contestId!, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['entries', contestId] });
       setRegisterError(null);
+      setShowRegFormForce(false);
     },
     onError: (err: any) => {
       setRegisterError(err?.response?.data?.message || 'Failed to register.');
@@ -115,14 +130,16 @@ export const ContestDetailPage: React.FC = () => {
   const [inviteUserId, setInviteUserId] = useState('');
   const [lineupError, setLineupError] = useState<string | null>(null);
 
+  const teamEntry = userEntries.find(e => e.entry_type === 'team');
+
   const { data: lineupMembers = [], refetch: refetchLineupMembers } = useQuery<EntryMember[]>({
-    queryKey: ['lineupMembers', userEntry?.id],
-    queryFn: () => api.getEntryMembers(userEntry!.id),
-    enabled: !!userEntry && userEntry.entry_type === 'team',
+    queryKey: ['lineupMembers', teamEntry?.id],
+    queryFn: () => api.getEntryMembers(teamEntry!.id),
+    enabled: !!teamEntry,
   });
 
   const addLineupMemberMutation = useMutation({
-    mutationFn: (userId: string) => api.addEntryMember(userEntry!.id, { user_id: userId, role: 'member' }),
+    mutationFn: (userId: string) => api.addEntryMember(teamEntry!.id, { user_id: userId, role: 'member' }),
     onSuccess: () => {
       setInviteUserId('');
       setLineupError(null);
@@ -134,7 +151,7 @@ export const ContestDetailPage: React.FC = () => {
   });
 
   const removeLineupMemberMutation = useMutation({
-    mutationFn: (userId: string) => api.removeEntryMember(userEntry!.id, userId),
+    mutationFn: (userId: string) => api.removeEntryMember(teamEntry!.id, userId),
     onSuccess: () => {
       setLineupError(null);
       refetchLineupMembers();
@@ -172,12 +189,26 @@ export const ContestDetailPage: React.FC = () => {
 
     const displayName = customDisplayName.trim();
 
+    let startAt: string | undefined;
+    let endAt: string | undefined;
+
+    if (selectedEntryMode === 'virtual') {
+      const start = new Date(contest.start_time).getTime();
+      const end = new Date(contest.end_time).getTime();
+      const duration = end - start;
+      const now = new Date();
+      startAt = now.toISOString();
+      endAt = new Date(now.getTime() + duration).toISOString();
+    }
+
     if (selectedRegType === 'individual') {
       registerMutation.mutate({
         entry_type: 'individual',
-        entry_mode: 'official',
+        entry_mode: selectedEntryMode,
         user_id: user.id,
         display_name: displayName || user.full_name,
+        start_at: startAt,
+        end_at: endAt,
       });
     } else {
       if (!selectedTeamId) {
@@ -187,9 +218,11 @@ export const ContestDetailPage: React.FC = () => {
       const team = myTeams.find(t => t.id === selectedTeamId);
       registerMutation.mutate({
         entry_type: 'team',
-        entry_mode: 'official',
+        entry_mode: selectedEntryMode,
         team_id: selectedTeamId,
         display_name: displayName || team?.name || 'Team',
+        start_at: startAt,
+        end_at: endAt,
       });
     }
   };
@@ -292,20 +325,42 @@ export const ContestDetailPage: React.FC = () => {
                       <button className="btn btn-secondary" style={{ width: '100%' }} disabled>
                         Locked
                       </button>
-                    ) : (
+                    ) : (isAdmin || isJury) ? (
                       <button
-                        onClick={() => {
-                          if (isApproved || isAdmin || isJury) {
-                            navigate(`/contests/${contest.id}/phases/${def.key}`);
-                          } else {
-                            setRegisterError('You must register and be approved by the jury to enter.');
-                          }
-                        }}
+                        onClick={() => navigate(`/contests/${contest.id}/phases/${def.key}`)}
                         className={`btn ${info.status === 'active' ? 'btn-primary' : 'btn-secondary'}`}
                         style={{ width: '100%' }}
                       >
-                        Enter Phase Hub
+                        Enter Phase Hub (Jury)
                       </button>
+                    ) : approvedEntries.length === 0 ? (
+                      <div className="flex flex-col gap-1" style={{ width: '100%' }}>
+                        <button
+                          onClick={() => navigate(`/contests/${contest.id}/phases/${def.key}`)}
+                          className="btn btn-secondary"
+                          style={{ width: '100%', fontSize: '0.85rem', padding: '0.4rem 0.8rem' }}
+                        >
+                          View Standings (Spectator)
+                        </button>
+                        {userEntries.length > 0 && (
+                          <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: '0.25rem 0 0 0', textAlign: 'center' }}>
+                            Your registration is pending approval.
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {approvedEntries.map(entry => (
+                          <button
+                            key={entry.id}
+                            onClick={() => navigate(`/contests/${contest.id}/phases/${def.key}?mode=${entry.entry_mode}`)}
+                            className={`btn ${info.status === 'active' ? 'btn-primary' : 'btn-secondary'} flex items-center justify-center gap-1`}
+                            style={{ width: '100%', textTransform: 'capitalize', fontSize: '0.85rem', padding: '0.4rem' }}
+                          >
+                            Enter as {entry.entry_mode}
+                          </button>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -400,22 +455,58 @@ export const ContestDetailPage: React.FC = () => {
                   </p>
                   <Link to="/login" className="btn btn-primary" style={{ width: '100%' }}>Login</Link>
                 </div>
-              ) : isRegistered ? (
+              ) : (isRegistered && !showRegFormForce) ? (
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center gap-2 text-success" style={{ color: 'hsl(var(--success))', fontWeight: 600 }}>
                     <CheckCircle2 size={20} />
-                    <span>Registered</span>
+                    <span>Your Participation</span>
                   </div>
-                  <div style={{ fontSize: '0.9rem' }}>
-                    <div><strong>Mode:</strong> {userEntry.entry_type}</div>
-                    <div><strong>Status:</strong> <span className={`badge ${userEntry.status === 'approved' || userEntry.status === 'active' ? 'badge-success' : 'badge-warning'}`}>{userEntry.status}</span></div>
+
+                  <div className="flex flex-col gap-2">
+                    {userEntries.map(e => (
+                      <div key={e.id} style={{ padding: '0.75rem', border: '1px solid hsl(var(--border))', borderRadius: 'var(--radius)', backgroundColor: 'var(--background)' }}>
+                        <div className="flex justify-between items-center" style={{ marginBottom: '0.25rem' }}>
+                          <span style={{ fontWeight: 600, fontSize: '0.85rem', textTransform: 'capitalize' }}>
+                            {e.entry_mode} Mode
+                          </span>
+                          <span className={`badge ${e.status === 'approved' || e.status === 'active' || e.status === 'finished' ? 'badge-success' : 'badge-warning'}`} style={{ fontSize: '0.65rem' }}>
+                            {e.status}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          <div>Name: <strong>{e.display_name}</strong> ({e.entry_type})</div>
+                          {e.entry_mode === 'virtual' && e.start_at && e.end_at && (
+                            <div style={{ marginTop: '0.25rem', fontSize: '0.7rem' }}>
+                              Timeline: {new Date(e.start_at).toLocaleString()} - {new Date(e.end_at).toLocaleString()}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  {userEntry.status === 'pending' && (
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                      Your registration is pending approval by the judges.
-                    </p>
-                  )}
-                  {userEntry.entry_type === 'team' && (
+
+                  {/* Register in another mode button if there are modes left */}
+                  {(() => {
+                    const registeredModes = userEntries.map(e => e.entry_mode);
+                    const availableModes = (['official', 'virtual', 'practice'] as const).filter(mode => !registeredModes.includes(mode));
+                    if (availableModes.length > 0) {
+                      return (
+                        <button
+                          onClick={() => {
+                            setSelectedEntryMode(availableModes[0]);
+                            setShowRegFormForce(true);
+                          }}
+                          className="btn btn-secondary flex items-center justify-center gap-1"
+                          style={{ fontSize: '0.8rem', padding: '0.4rem', marginTop: '0.5rem' }}
+                        >
+                          <Plus size={14} /> Register for another mode
+                        </button>
+                      );
+                    }
+                    return null;
+                  })()}
+
+                  {teamEntry && (
                     <div style={{ marginTop: '1rem', borderTop: '1px solid hsl(var(--border))', paddingTop: '1rem' }}>
                       <h4 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>Team Lineup Members</h4>
                       
@@ -477,6 +568,20 @@ export const ContestDetailPage: React.FC = () => {
                 </div>
               ) : (
                 <div className="flex flex-col gap-3">
+                  {/* Cancel button if forcing new registration */}
+                  {isRegistered && (
+                    <div className="flex justify-between items-center">
+                      <h4 style={{ margin: 0, fontSize: '0.9rem' }}>New Registration</h4>
+                      <button
+                        onClick={() => setShowRegFormForce(false)}
+                        className="text-muted"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem' }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+
                   <div className="flex gap-2" style={{ borderBottom: '1px solid hsl(var(--border))', paddingBottom: '0.75rem', marginBottom: '0.5rem' }}>
                     {contest.entry_policy !== 'team' && (
                       <button
@@ -508,6 +613,34 @@ export const ContestDetailPage: React.FC = () => {
                       </button>
                     )}
                   </div>
+
+                  {/* Entry Mode Selection */}
+                  {(() => {
+                    const registeredModes = userEntries.map(e => e.entry_mode);
+                    const availableModes = (['official', 'virtual', 'practice'] as const).filter(mode => !registeredModes.includes(mode));
+                    return (
+                      <div className="flex flex-col gap-2">
+                        <label className="form-label" style={{ fontSize: '0.75rem' }}>Participation Mode</label>
+                        <select
+                          className="form-input"
+                          style={{ fontSize: '0.8rem', padding: '0.4rem 0.6rem', height: 'auto' }}
+                          value={selectedEntryMode}
+                          onChange={(e) => setSelectedEntryMode(e.target.value as any)}
+                        >
+                          {availableModes.map(m => (
+                            <option key={m} value={m} style={{ textTransform: 'capitalize' }}>
+                              {m === 'official' ? 'Official Contest Entry' : m === 'virtual' ? 'Virtual Replay (Contest Replay)' : 'Practice Mode'}
+                            </option>
+                          ))}
+                        </select>
+                        {selectedEntryMode === 'virtual' && (
+                          <div style={{ padding: '0.5rem', border: '1px solid hsl(var(--warning))', borderRadius: 'var(--radius)', backgroundColor: 'hsla(var(--warning), 0.05)', fontSize: '0.7rem', color: 'var(--warning-dark)' }}>
+                            ⚠️ Virtual replay starts a private timer immediately upon registration. Your timeline matches the original contest duration.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {selectedRegType === 'individual' ? (
                     <div className="flex flex-col gap-2">

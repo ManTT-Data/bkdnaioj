@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { api, type Contest, type Task } from '../lib/api-client';
+import { api, type Contest, type Task, type TaskStats } from '../lib/api-client';
 import { Code2, Search, CheckCircle2, Clock, ArrowRight } from 'lucide-react';
 
 interface RichTask extends Task {
@@ -42,6 +42,18 @@ export const ProblemsPage: React.FC = () => {
   });
 
   const isLoading = loadingContests || (contests.length > 0 && loadingTasks);
+
+  const { data: taskStats = [] } = useQuery<TaskStats[]>({
+    queryKey: ['task-stats'],
+    queryFn: api.getTaskStats,
+    retry: false,
+  });
+
+  const taskStatsByTaskId = useMemo(() => {
+    const m = new Map<string, TaskStats>();
+    taskStats.forEach((s) => m.set(s.task_id, s));
+    return m;
+  }, [taskStats]);
 
   const getDifficulty = (index: number) => {
     if (index % 3 === 0) return 'Easy';
@@ -155,9 +167,9 @@ export const ProblemsPage: React.FC = () => {
                   const diff = getDifficulty(index);
                   const diffColor = getDiffColor(diff);
                   
-                  // Mock statistics matching pattern
-                  const solvedCount = Math.max(12, 120 - index * 18);
-                  const successRate = `${Math.max(10, 70 - index * 12)}%`;
+                  const stats = taskStatsByTaskId.get(task.id);
+                  const solvedCount = stats?.solved_entries ?? 0;
+                  const successRate = `${Math.round(stats?.success_rate ?? 0)}%`;
 
                   return (
                     <tr 

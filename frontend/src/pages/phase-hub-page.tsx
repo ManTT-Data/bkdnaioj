@@ -66,6 +66,10 @@ export const PhaseHubPage: React.FC = () => {
 
   // Standings Mode
   const [standingsMode, setStandingsMode] = useState<'task' | 'overall'>('task');
+  const [leaderboardMode, setLeaderboardMode] = useState<'official' | 'virtual' | 'practice'>(() => {
+    const m = searchParams.get('mode');
+    return (m === 'virtual' || m === 'practice') ? m : 'official';
+  });
 
   // Support Ticket Form State
   const [ticketCategory, setTicketCategory] = useState<'upload' | 'judge' | 'score' | 'system'>('system');
@@ -125,11 +129,43 @@ export const PhaseHubPage: React.FC = () => {
     enabled: !!user,
   });
 
-  const userEntry = entries.find(
+  const userEntries = entries.filter(
     e => e.user_id === user?.id || 
          e.registered_by === user?.id || 
          (e.team_id && myTeams.some(t => t.id === e.team_id))
   );
+
+  const activeMode = searchParams.get('mode') || 'official';
+  const userEntry = userEntries.find(e => e.entry_mode === activeMode) || userEntries[0];
+
+  // Helper to compute active phase times based on participation mode
+  const getPhaseTimes = (phase: Phase | null) => {
+    if (!phase) return null;
+    let openTime = new Date(phase.open_time);
+    let closeTime = new Date(phase.close_time);
+    let modeText = 'Official Timeline';
+
+    if (userEntry?.entry_mode === 'virtual' && userEntry.start_at && contest) {
+      const contestStart = new Date(contest.start_time).getTime();
+      const phaseOpen = new Date(phase.open_time).getTime();
+      const phaseClose = new Date(phase.close_time).getTime();
+      const phaseOpenOffset = phaseOpen - contestStart;
+      const phaseCloseOffset = phaseClose - contestStart;
+
+      const virtualStartAt = new Date(userEntry.start_at).getTime();
+      openTime = new Date(virtualStartAt + phaseOpenOffset);
+      closeTime = new Date(virtualStartAt + phaseCloseOffset);
+      modeText = 'Virtual Timeline';
+    } else if (userEntry?.entry_mode === 'practice') {
+      modeText = 'Practice Timeline';
+    }
+
+    const now = new Date();
+    const isLocked = now < openTime;
+    const isEnded = userEntry?.entry_mode === 'practice' ? false : now > closeTime;
+
+    return { openTime, closeTime, isLocked, isEnded, modeText };
+  };
 
   // Fetch all phases for the tasks to match the current PhaseDef ID
   const { data: taskPhasesMap = {} } = useQuery<{ [taskId: string]: Phase }>({
@@ -170,8 +206,8 @@ export const PhaseHubPage: React.FC = () => {
 
   // Query standings
   const { data: leaderboard = [], refetch: refetchLeaderboard } = useQuery<LeaderboardRow[]>({
-    queryKey: ['leaderboard', activePhase?.id],
-    queryFn: () => api.getTaskPhaseLeaderboard(activePhase!.id),
+    queryKey: ['leaderboard', activePhase?.id, leaderboardMode],
+    queryFn: () => api.getTaskPhaseLeaderboard(activePhase!.id, leaderboardMode),
     enabled: !!activePhase && activeTab === 'standings',
     refetchInterval: 10000, // Poll every 10 seconds
   });
@@ -185,8 +221,8 @@ export const PhaseHubPage: React.FC = () => {
 
   // Query overall phase standings
   const { data: overallLeaderboard = [], refetch: refetchOverallLeaderboard } = useQuery<LeaderboardRow[]>({
-    queryKey: ['overallLeaderboard', contestId, currentDef?.id],
-    queryFn: () => api.getContestPhaseLeaderboard(contestId!, currentDef!.id),
+    queryKey: ['overallLeaderboard', contestId, currentDef?.id, leaderboardMode],
+    queryFn: () => api.getContestPhaseLeaderboard(contestId!, currentDef!.id, leaderboardMode),
     enabled: !!contestId && !!currentDef && activeTab === 'standings' && standingsMode === 'overall',
     refetchInterval: 10000, // Poll every 10 seconds
   });
@@ -429,6 +465,55 @@ export const PhaseHubPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Participation Mode Banner */}
+      {userEntry && (
+        <div style={{
+          padding: '0.75rem 1rem',
+          borderRadius: 'var(--radius)',
+          marginBottom: '1.5rem',
+          backgroundColor: userEntry.entry_mode === 'official' ? 'hsla(var(--primary), 0.05)' : userEntry.entry_mode === 'virtual' ? 'hsla(var(--warning), 0.05)' : 'hsla(var(--success), 0.05)',
+          border: userEntry.entry_mode === 'official' ? '1px solid hsl(var(--primary))' : userEntry.entry_mode === 'virtual' ? '1px solid hsl(var(--warning))' : '1px solid hsl(var(--success))',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          fontSize: '0.9rem'
+        }}>
+          <div>
+            You are participating in <strong>{userEntry.entry_mode.toUpperCase()} MODE</strong>.
+            {userEntry.entry_mode === 'virtual' && userEntry.start_at && userEntry.end_at && (
+              <span style={{ marginLeft: '0.5rem', fontSize: '0.85rem' }} className="text-muted">
+                (Virtual timer: {new Date(userEntry.start_at).toLocaleString()} to {new Date(userEntry.end_at).toLocaleString()})
+              </span>
+            )}
+            {userEntry.entry_mode === 'practice' && (
+              <span style={{ marginLeft: '0.5rem', fontSize: '0.85rem' }} className="text-muted">
+                (Practice submissions do not affect official standings rankings)
+              </span>
+            )}
+          </div>
+          {userEntries.length > 1 && (
+            <div className="flex items-center gap-2">
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, margin: 0 }}>Switch View:</label>
+              <select
+                className="form-input"
+                style={{ fontSize: '0.8rem', padding: '0.2rem 0.5rem', height: 'auto', width: 'fit-content', margin: 0 }}
+                value={activeMode}
+                onChange={(e) => {
+                  setSearchParams({ tab: activeTab, mode: e.target.value });
+                  setLeaderboardMode(e.target.value as any);
+                }}
+              >
+                {userEntries.map(e => (
+                  <option key={e.id} value={e.entry_mode} style={{ textTransform: 'capitalize' }}>
+                    {e.entry_mode} Mode
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Tab bar navigation */}
       <div className="tab-bar">
         <div className={`tab-item ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => handleTabChange('overview')}>
@@ -559,35 +644,41 @@ export const PhaseHubPage: React.FC = () => {
                 <div style={{ padding: '0.75rem', backgroundColor: 'var(--background)', borderRadius: 'var(--radius)', fontSize: '0.85rem', marginBottom: '2rem' }}>
                   <div className="flex gap-4" style={{ flexWrap: 'wrap' }}>
                     <div><strong>Score Direction:</strong> {selectedTask.higher_is_better ? 'Higher is better' : 'Lower is better'}</div>
-                    {activePhase && (
-                      <>
-                        <div><strong>Submission Limit:</strong> {activePhase.submission_limit || 'Unlimited'}</div>
-                        <div><strong>Scoreboard:</strong> {activePhase.leaderboard_mode} mode</div>
-                        <div><strong>Open Time:</strong> {new Date(activePhase.open_time).toLocaleString()}</div>
-                        <div><strong>Close Time:</strong> {new Date(activePhase.close_time).toLocaleString()}</div>
-                      </>
-                    )}
+                    {activePhase && (() => {
+                      const times = getPhaseTimes(activePhase);
+                      if (!times) return null;
+                      return (
+                        <>
+                          <div><strong>Submission Limit:</strong> {activePhase.submission_limit || 'Unlimited'}</div>
+                          <div><strong>Scoreboard:</strong> {activePhase.leaderboard_mode} mode</div>
+                          <div><strong>Timeline:</strong> <span className="badge badge-secondary" style={{ textTransform: 'capitalize' }}>{userEntry?.entry_mode || 'Jury'} Mode</span></div>
+                          <div><strong>Open Time:</strong> {times.openTime.toLocaleString()}</div>
+                          {userEntry?.entry_mode !== 'practice' && (
+                            <div><strong>Close Time:</strong> {times.closeTime.toLocaleString()}</div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
 
                 {/* Upload section */}
                 {activePhase ? (() => {
-                  const now = new Date();
-                  const isLocked = now < new Date(activePhase.open_time);
-                  const isEnded = now > new Date(activePhase.close_time);
-
-                  if (isLocked) {
+                  const times = getPhaseTimes(activePhase);
+                  if (!times) return null;
+ 
+                  if (times.isLocked) {
                     return (
                       <div className="alert alert-warning" style={{ marginTop: '1rem' }}>
-                        This phase will open at <strong>{new Date(activePhase.open_time).toLocaleString()}</strong>. Submissions are currently locked.
+                        This phase will open at <strong>{times.openTime.toLocaleString()}</strong>. Submissions are currently locked.
                       </div>
                     );
                   }
-
-                  if (isEnded) {
+ 
+                  if (times.isEnded) {
                     return (
                       <div className="alert alert-danger" style={{ marginTop: '1rem' }}>
-                        This phase ended at <strong>{new Date(activePhase.close_time).toLocaleString()}</strong>. Submissions are closed.
+                        This phase ended at <strong>{times.closeTime.toLocaleString()}</strong>. Submissions are closed.
                       </div>
                     );
                   }
@@ -762,10 +853,15 @@ export const PhaseHubPage: React.FC = () => {
       {activeTab === 'standings' && (
         <div className="panel" style={{ padding: 0 }}>
           <div className="panel-header" style={{ padding: '1rem 1.5rem', marginBottom: 0 }}>
-            <h3 style={{ margin: 0 }}>
-              {standingsMode === 'task'
-                ? (selectedTask ? `${selectedTask.title} Leaderboard` : 'Task Leaderboard')
-                : 'Overall Phase Standings'}
+            <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span>
+                {standingsMode === 'task'
+                  ? (selectedTask ? `${selectedTask.title} Leaderboard` : 'Task Leaderboard')
+                  : 'Overall Phase Standings'}
+              </span>
+              <span className="badge badge-secondary" style={{ fontSize: '0.75rem', textTransform: 'capitalize' }}>
+                {leaderboardMode} Mode
+              </span>
             </h3>
             <div className="flex gap-2">
               {(isAdmin || isJury) && activePhase && standingsMode === 'task' && (
@@ -813,27 +909,54 @@ export const PhaseHubPage: React.FC = () => {
           </div>
 
           {/* Standings Mode Switcher */}
-          <div className="flex flex-wrap gap-2" style={{ borderBottom: '1px solid hsl(var(--border))', padding: '0.75rem 1.5rem', backgroundColor: 'var(--background)' }}>
-            <button
-              onClick={() => setStandingsMode('overall')}
-              className={`btn ${standingsMode === 'overall' ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ padding: '0.3rem 0.75rem', fontSize: '0.8rem' }}
-            >
-              Overall Standing
-            </button>
-            {tasks.filter(t => !!taskPhasesMap[t.id]).map(t => (
+          <div className="flex flex-wrap gap-2 justify-between items-center" style={{ borderBottom: '1px solid hsl(var(--border))', padding: '0.75rem 1.5rem', backgroundColor: 'var(--background)', rowGap: '0.5rem' }}>
+            <div className="flex flex-wrap gap-2">
               <button
-                key={t.id}
-                onClick={() => {
-                  setSelectedTaskId(t.id);
-                  setStandingsMode('task');
-                }}
-                className={`btn ${standingsMode === 'task' && selectedTaskId === t.id ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setStandingsMode('overall')}
+                className={`btn ${standingsMode === 'overall' ? 'btn-primary' : 'btn-secondary'}`}
                 style={{ padding: '0.3rem 0.75rem', fontSize: '0.8rem' }}
               >
-                {t.title}
+                Overall Standing
               </button>
-            ))}
+              {tasks.filter(t => !!taskPhasesMap[t.id]).map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    setSelectedTaskId(t.id);
+                    setStandingsMode('task');
+                  }}
+                  className={`btn ${standingsMode === 'task' && selectedTaskId === t.id ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ padding: '0.3rem 0.75rem', fontSize: '0.8rem' }}
+                >
+                  {t.title}
+                </button>
+              ))}
+            </div>
+
+            {/* Filter by Entry Mode (Official, Virtual, Practice) */}
+            <div className="flex items-center gap-2" style={{ marginLeft: 'auto' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)' }}>Standings Group:</span>
+              <div className="flex gap-1" style={{ border: '1px solid hsl(var(--border))', borderRadius: 'var(--radius)', padding: '0.15rem', backgroundColor: 'var(--background)' }}>
+                {(['official', 'virtual', 'practice'] as const).map(mode => (
+                  <button
+                    key={mode}
+                    onClick={() => setLeaderboardMode(mode)}
+                    className={`btn`}
+                    style={{
+                      padding: '0.2rem 0.6rem',
+                      fontSize: '0.75rem',
+                      textTransform: 'capitalize',
+                      border: 'none',
+                      backgroundColor: leaderboardMode === mode ? 'hsl(var(--primary))' : 'transparent',
+                      color: leaderboardMode === mode ? 'white' : 'var(--text)',
+                      boxShadow: 'none'
+                    }}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
           {/* Freeze Warning */}

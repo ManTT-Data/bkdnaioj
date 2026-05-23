@@ -60,6 +60,7 @@ func NewRouter(d *Deps) *echo.Echo {
 	registerClarifications(api, q, d.JWTMgr)
 	registerTickets(api, q, d.JWTMgr)
 	registerLeaderboards(api, q, d.JWTMgr)
+	registerStats(api, q)
 	registerAdmin(api, q, d.JWTMgr)
 
 	return e
@@ -165,4 +166,11 @@ func registerEntries(api *echo.Group, q *db.Queries, jwtMgr *security.JWTManager
 	jury := api.Group("", auth, mw.RequireRole("admin", "jury"))
 	jury.POST("/entries/:id/approve", eh.Approve)
 	jury.POST("/entries/:id/disqualify", eh.Disqualify)
+}
+
+func registerStats(api *echo.Group, q *db.Queries) {
+	h := handlers.NewStatsHandler(q)
+	stats := api.Group("/stats")
+	stats.GET("/summary", h.Summary)
+	stats.GET("/tasks", h.TaskStats)
 }

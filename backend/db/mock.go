@@ -17,7 +17,9 @@ type MockQuerier struct {
 	CountActiveEntriesFunc                func(ctx context.Context) (int64, error)
 	CountContestsFunc                     func(ctx context.Context) (int64, error)
 	CountSubmissionsFunc                  func(ctx context.Context) (int64, error)
+	CountTasksFunc                        func(ctx context.Context) (int64, error)
 	CountUsersFunc                        func(ctx context.Context) (int64, error)
+	GetTaskSubmissionStatsFunc            func(ctx context.Context) ([]GetTaskSubmissionStatsRow, error)
 	CreateAnnouncementFunc                func(ctx context.Context, arg CreateAnnouncementParams) (Announcement, error)
 	CreateClarificationFunc               func(ctx context.Context, arg CreateClarificationParams) (Clarification, error)
 	CreateContestFunc                     func(ctx context.Context, arg CreateContestParams) (Contest, error)
@@ -149,11 +151,25 @@ func (m *MockQuerier) CountSubmissions(ctx context.Context) (int64, error) {
 	return 0, nil
 }
 
+func (m *MockQuerier) CountTasks(ctx context.Context) (int64, error) {
+	if m.CountTasksFunc != nil {
+		return m.CountTasksFunc(ctx)
+	}
+	return 0, nil
+}
+
 func (m *MockQuerier) CountUsers(ctx context.Context) (int64, error) {
 	if m.CountUsersFunc != nil {
 		return m.CountUsersFunc(ctx)
 	}
 	return 0, nil
+}
+
+func (m *MockQuerier) GetTaskSubmissionStats(ctx context.Context) ([]GetTaskSubmissionStatsRow, error) {
+	if m.GetTaskSubmissionStatsFunc != nil {
+		return m.GetTaskSubmissionStatsFunc(ctx)
+	}
+	return nil, nil
 }
 
 func (m *MockQuerier) CreateAnnouncement(ctx context.Context, arg CreateAnnouncementParams) (Announcement, error) {

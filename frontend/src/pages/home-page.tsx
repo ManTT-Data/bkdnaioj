@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, type Contest, type Task } from '../lib/api-client';
+import { api, type Announcement, type Contest, type PublicStatsSummary, type Task, type TaskStats } from '../lib/api-client';
 import { useAuth } from '../contexts/auth-context';
 import {
   Calendar,
@@ -9,13 +9,18 @@ import {
   Clock,
   Plus,
   AlertCircle,
-  Cpu,
-  BarChart3,
-  Award,
-  Users,
   MapPin,
-  Code2
+  Code2,
+  Megaphone,
+  Newspaper,
+  Trophy,
+  Users,
+  UploadCloud
 } from 'lucide-react';
+
+interface RichAnnouncement extends Announcement {
+  contestTitle: string;
+}
 
 export const HomePage: React.FC = () => {
   const { isAdmin } = useAuth();
@@ -99,132 +104,109 @@ export const HomePage: React.FC = () => {
     enabled: !!activeContest?.id,
   });
 
-  // Fallback / Mock Contests for demo when DB is empty
+  const contestsForNewsfeed = contests.filter(c => c.status !== 'draft').slice(0, 6);
+
+  const { data: globalTasks = [] } = useQuery<Task[]>({
+    queryKey: ['home-global-tasks', contests.map(c => c.id).join(',')],
+    queryFn: async () => {
+      if (contests.length === 0) return [];
+      const results = await Promise.all(
+        contests
+          .filter(c => c.status !== 'draft')
+          .map(async (contest) => {
+            try {
+              return await api.getTasks(contest.id);
+            } catch (e) {
+              console.error(`Failed to load tasks for contest ${contest.id}`, e);
+              return [];
+            }
+          })
+      );
+      return results.flat();
+    },
+    enabled: contests.length > 0,
+  });
+
+  const { data: publicStats } = useQuery<PublicStatsSummary>({
+    queryKey: ['public-stats-summary'],
+    queryFn: api.getPublicStatsSummary,
+    retry: false,
+  });
+
+  const { data: taskStats = [] } = useQuery<TaskStats[]>({
+    queryKey: ['task-stats'],
+    queryFn: api.getTaskStats,
+    retry: false,
+  });
+
+  const taskStatsByTaskId = useMemo(() => {
+    const m = new Map<string, TaskStats>();
+    taskStats.forEach((s) => m.set(s.task_id, s));
+    return m;
+  }, [taskStats]);
+
+  const { data: newsfeedItems = [], isLoading: loadingNewsfeed } = useQuery<RichAnnouncement[]>({
+    queryKey: ['home-newsfeed', contestsForNewsfeed.map(c => c.id).join(',')],
+    queryFn: async () => {
+      if (contestsForNewsfeed.length === 0) return [];
+
+      const results = await Promise.all(
+        contestsForNewsfeed.map(async (contest) => {
+          try {
+            const list = await api.getAnnouncements(contest.id);
+            return list.map(item => ({
+              ...item,
+              contestTitle: contest.title,
+            }));
+          } catch (e) {
+            console.error(`Failed to load announcements for contest ${contest.id}`, e);
+            return [];
+          }
+        })
+      );
+
+      return results
+        .flat()
+        .sort((a, b) => {
+          if (a.is_pinned && !b.is_pinned) return -1;
+          if (!a.is_pinned && b.is_pinned) return 1;
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        })
+        .slice(0, 4);
+    },
+    enabled: contestsForNewsfeed.length > 0,
+  });
+
   const displayContests = contests.filter(c => c.status !== 'draft');
-  const contestsToRender = displayContests.length > 0 ? displayContests : [
-    {
-      id: 'mock-1',
-      title: 'AI OLP 2024 - Vòng loại',
-      slug: 'ai-olp-2024-vong-loai',
-      start_time: '2026-06-01T08:00:00Z',
-      end_time: '2026-06-01T13:00:00Z',
-      entry_policy: 'individual' as const,
-      status: 'running' as const,
-      isMock: true,
-      mode: 'Thi cá nhân',
-      location: 'Online'
-    },
-    {
-      id: 'mock-2',
-      title: 'AI OLP 2024 - Chung kết',
-      slug: 'ai-olp-2024-chung-ket',
-      start_time: '2026-06-15T08:00:00Z',
-      end_time: '2026-06-15T13:00:00Z',
-      entry_policy: 'team' as const,
-      status: 'upcoming' as const,
-      isMock: true,
-      mode: 'Thi đồng đội',
-      location: 'Onsite'
-    }
-  ];
 
-  // Exercises data generation
-  const mockExercises = [
-    {
-      id: 'mock-ex-1',
-      letter: 'A',
-      title: 'AI Foundation',
-      difficulty: 'Easy',
-      solvedCount: 100,
-      successRate: '60%',
-      link: '#'
-    },
-    {
-      id: 'mock-ex-2',
-      letter: 'B',
-      title: 'Data Processing',
-      difficulty: 'Medium',
-      solvedCount: 78,
-      successRate: '42%',
-      link: '#'
-    },
-    {
-      id: 'mock-ex-3',
-      letter: 'C',
-      title: 'Neural Network',
-      difficulty: 'Medium',
-      solvedCount: 64,
-      successRate: '35%',
-      link: '#'
-    },
-    {
-      id: 'mock-ex-4',
-      letter: 'D',
-      title: 'Decision Tree',
-      difficulty: 'Hard',
-      solvedCount: 45,
-      successRate: '20%',
-      link: '#'
-    },
-    {
-      id: 'mock-ex-5',
-      letter: 'E',
-      title: 'Heuristic Search',
-      difficulty: 'Hard',
-      solvedCount: 31,
-      successRate: '15%',
-      link: '#'
-    }
-  ];
+  const contestantCount = publicStats?.users ?? 0;
+  const contestCount = publicStats?.contests ?? displayContests.length;
+  const problemCount = publicStats?.tasks ?? globalTasks.length;
+  const submissionCount = publicStats?.submissions ?? 0;
 
-  const exercisesToRender: Array<{
-    id: string;
-    letter: string;
-    title: string;
-    difficulty: 'Easy' | 'Medium' | 'Hard';
-    solvedCount: number;
-    successRate: string;
-    link: string;
-  }> = [];
+  const contestsToRender = displayContests;
 
-  // Map real tasks if they exist
-  realTasks.forEach((task, index) => {
-    const letter = String.fromCharCode(65 + index); // A, B, C...
+  const homeTasksSource = realTasks.length > 0 ? realTasks : globalTasks;
+  const exercisesToRender = homeTasksSource.slice(0, 5).map((task, index) => {
+    const letter = String.fromCharCode(65 + index);
     let difficulty: 'Easy' | 'Medium' | 'Hard' = 'Medium';
     if (index === 0) difficulty = 'Easy';
     if (index > 3) difficulty = 'Hard';
 
-    const solvedCount = Math.max(12, 120 - index * 18);
-    const successRate = `${Math.max(10, 70 - index * 12)}%`;
+    const stats = taskStatsByTaskId.get(task.id);
+    const solvedCount = stats?.solved_entries ?? 0;
+    const successRate = `${Math.round(stats?.success_rate ?? 0)}%`;
 
-    exercisesToRender.push({
+    return {
       id: task.id,
       letter,
       title: task.title,
       difficulty,
       solvedCount,
       successRate,
-      link: `/contests/${activeContest.id}`
-    });
+      link: `/contests/${task.contest_id}`,
+    };
   });
-
-  // Pad with mock exercises
-  if (exercisesToRender.length < 5) {
-    const existingCount = exercisesToRender.length;
-    const padding = mockExercises.slice(existingCount);
-    padding.forEach((item) => {
-      const letter = String.fromCharCode(65 + exercisesToRender.length);
-      exercisesToRender.push({
-        id: item.id,
-        letter,
-        title: item.title,
-        difficulty: item.difficulty as 'Easy' | 'Medium' | 'Hard',
-        solvedCount: item.solvedCount,
-        successRate: item.successRate,
-        link: item.link
-      });
-    });
-  }
 
   // Date formatter helper: DD/MM/YYYY HH:mm
   const formatDateTime = (dateStr: string) => {
@@ -259,123 +241,128 @@ export const HomePage: React.FC = () => {
 
   return (
     <div className="container" style={{ paddingTop: '2rem', paddingBottom: '4rem' }}>
-      
-      {/* Hero Banner Section */}
-      <div className="home-banner">
-        <div className="home-banner-grid-bg"></div>
-        <div className="home-banner-glow"></div>
-        
-        <div className="home-banner-content">
-          <span className="home-banner-badge">AI OLP 2026</span>
-          <h1 className="home-banner-title">AI OLP Student Contest</h1>
-          <p className="home-banner-subtitle">
-            Nền tảng thi lập trình trực tuyến dành cho sinh viên – Công bằng. Minh bạch. Hiệu quả.
-          </p>
-          <div className="home-banner-actions">
-            <button 
-              onClick={() => handleScrollToSection('contests-section')}
-              className="btn btn-primary"
-              style={{ backgroundColor: '#2563eb', padding: '0.75rem 1.5rem', fontWeight: 600, border: 'none', borderRadius: '6px' }}
-            >
-              Xem contest hiện tại
-            </button>
-            <button 
-              onClick={() => handleScrollToSection('exercises-section')}
-              className="btn btn-secondary"
-              style={{ border: '1px solid rgba(255,255,255,0.2)', backgroundColor: 'rgba(255,255,255,0.08)', color: '#ffffff', padding: '0.75rem 1.5rem', fontWeight: 600, borderRadius: '6px' }}
-            >
-              Xem bài tập
-            </button>
+
+      {/* Top: Hero + Newsfeed */}
+      <div className="home-top-grid">
+        <div className="home-banner" style={{ marginBottom: 0 }}>
+          <div className="home-banner-grid-bg"></div>
+          <div className="home-banner-glow"></div>
+
+          <div className="home-banner-content">
+            <span className="home-banner-badge">AI OLP 2026</span>
+            <h1 className="home-banner-title">Nền tảng thi lập trình dành cho sinh viên</h1>
+            <p className="home-banner-subtitle">
+              Công bằng. Minh bạch. Hiệu quả. Dành riêng cho các cuộc thi AI OLP tại các trường đại học.
+            </p>
+            <div className="home-banner-actions">
+              <button
+                onClick={() => handleScrollToSection('contests-section')}
+                className="btn btn-primary"
+                style={{ backgroundColor: '#2563eb', padding: '0.75rem 1.5rem', fontWeight: 600, border: 'none', borderRadius: '6px' }}
+              >
+                Xem cuộc thi
+              </button>
+              <button
+                onClick={() => handleScrollToSection('exercises-section')}
+                className="btn btn-secondary"
+                style={{ border: '1px solid rgba(255,255,255,0.2)', backgroundColor: 'rgba(255,255,255,0.08)', color: '#ffffff', padding: '0.75rem 1.5rem', fontWeight: 600, borderRadius: '6px' }}
+              >
+                Giải bài tập
+              </button>
+            </div>
+          </div>
+
+          <div className="code-mockup-card">
+            <div className="code-mockup-header">
+              <span className="code-mockup-dot" style={{ backgroundColor: '#ef4444' }}></span>
+              <span className="code-mockup-dot" style={{ backgroundColor: '#eab308' }}></span>
+              <span className="code-mockup-dot" style={{ backgroundColor: '#22c55e' }}></span>
+              <span style={{ color: '#64748b', fontSize: '0.75rem', marginLeft: '0.5rem', fontFamily: 'var(--font-mono)' }}>solution.cpp</span>
+            </div>
+            <div className="code-mockup-body" style={{ fontFamily: 'monospace', fontSize: '0.8rem', lineHeight: '1.6' }}>
+              <div>
+                <span style={{ color: '#f43f5e' }}>#include</span>{' '}
+                <span style={{ color: '#34d399' }}>&lt;bits/stdc++.h&gt;</span>
+              </div>
+              <div>
+                <span style={{ color: '#f43f5e' }}>using namespace</span>{' '}
+                <span style={{ color: '#e2e8f0' }}>std;</span>
+              </div>
+              <br />
+              <div>
+                <span style={{ color: '#3b82f6' }}>int</span>{' '}
+                <span style={{ color: '#fbbf24' }}>main</span>() {'{'}
+              </div>
+              <div style={{ paddingLeft: '1.25rem' }}>
+                <span style={{ color: '#60a5fa' }}>ios::sync_with_stdio</span>(
+                <span style={{ color: '#f43f5e' }}>false</span>);
+              </div>
+              <div style={{ paddingLeft: '1.25rem' }}>
+                <span style={{ color: '#60a5fa' }}>cin.tie</span>(
+                <span style={{ color: '#fbbf24' }}>nullptr</span>);
+              </div>
+              <br />
+              <div style={{ paddingLeft: '1.25rem' }}>
+                <span style={{ color: '#f43f5e' }}>return</span>{' '}
+                <span style={{ color: '#60a5fa' }}>0</span>;
+              </div>
+              <div>{'}'}</div>
+            </div>
           </div>
         </div>
 
-        {/* Code Editor Widget mockup on the right */}
-        <div className="code-mockup-card">
-          <div className="code-mockup-header">
-            <span className="code-mockup-dot" style={{ backgroundColor: '#ef4444' }}></span>
-            <span className="code-mockup-dot" style={{ backgroundColor: '#eab308' }}></span>
-            <span className="code-mockup-dot" style={{ backgroundColor: '#22c55e' }}></span>
-            <span style={{ color: '#64748b', fontSize: '0.75rem', marginLeft: '0.5rem', fontFamily: 'var(--font-mono)' }}>solution.cpp</span>
+        <div className="panel" style={{ marginBottom: 0, padding: '1.25rem 1.25rem' }}>
+          <div className="home-section-header" style={{ marginBottom: '1rem', paddingBottom: '0.75rem' }}>
+            <h3 className="home-section-title" style={{ fontSize: '1.05rem' }}>
+              <Megaphone size={18} style={{ color: '#2563eb' }} />
+              Newsfeed
+            </h3>
+            <Link to="/newsfeed" className="home-section-link">Xem tất cả</Link>
           </div>
-          <div className="code-mockup-body" style={{ fontFamily: 'monospace', fontSize: '0.8rem', lineHeight: '1.6' }}>
-            <div>
-              <span style={{ color: '#f43f5e' }}>#include</span>{' '}
-              <span style={{ color: '#34d399' }}>&lt;bits/stdc++.h&gt;</span>
+
+          {loadingNewsfeed && (
+            <div className="flex flex-col items-center justify-center" style={{ minHeight: '160px' }}>
+              <div className="spinner"></div>
             </div>
-            <div>
-              <span style={{ color: '#f43f5e' }}>using namespace</span>{' '}
-              <span style={{ color: '#e2e8f0' }}>std;</span>
+          )}
+
+          {!loadingNewsfeed && newsfeedItems.length === 0 && (
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem', padding: '0.5rem 0' }}>
+              Chưa có thông báo nào.
             </div>
-            <br />
-            <div>
-              <span style={{ color: '#3b82f6' }}>int</span>{' '}
-              <span style={{ color: '#fbbf24' }}>main</span>() {'{'}
+          )}
+
+          {!loadingNewsfeed && newsfeedItems.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+              {newsfeedItems.map((item) => {
+                const d = new Date(item.created_at);
+                const pad = (n: number) => n.toString().padStart(2, '0');
+                const dateLabel = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`;
+
+                return (
+                  <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '56px 1fr', gap: '0.9rem' }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', paddingTop: '0.1rem' }}>
+                      {dateLabel}
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: '0.75rem', color: '#2563eb', fontWeight: 700, marginBottom: '0.15rem' }}>
+                        {item.contestTitle}
+                      </div>
+                      <div style={{ fontSize: '0.9rem', fontWeight: 650, color: 'var(--text-main)', lineHeight: 1.35 }}>
+                        {item.title}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <div style={{ paddingLeft: '1.25rem' }}>
-              <span style={{ color: '#60a5fa' }}>ios::sync_with_stdio</span>(
-              <span style={{ color: '#f43f5e' }}>false</span>);
-            </div>
-            <div style={{ paddingLeft: '1.25rem' }}>
-              <span style={{ color: '#60a5fa' }}>cin.tie</span>(
-              <span style={{ color: '#fbbf24' }}>nullptr</span>);
-            </div>
-            <br />
-            <div style={{ paddingLeft: '1.25rem' }}>
-              <span style={{ color: '#f43f5e' }}>return</span>{' '}
-              <span style={{ color: '#60a5fa' }}>0</span>;
-            </div>
-            <div>{'}'}</div>
-          </div>
+          )}
         </div>
       </div>
 
-      {/* Feature showcase grid */}
-      <div className="feature-grid">
-        <div className="feature-card">
-          <div className="feature-icon-container" style={{ backgroundColor: '#e0e7ff', color: '#4f46e5' }}>
-            <Cpu size={22} />
-          </div>
-          <div>
-            <div className="feature-title">Hệ thống chấm tự động</div>
-            <div className="feature-desc">Chấm bài nhanh chóng, chính xác và bảo mật.</div>
-          </div>
-        </div>
-        
-        <div className="feature-card">
-          <div className="feature-icon-container" style={{ backgroundColor: '#dcfce7', color: '#16a34a' }}>
-            <BarChart3 size={22} />
-          </div>
-          <div>
-            <div className="feature-title">Bảng xếp hạng</div>
-            <div className="feature-desc">Cập nhật realtime, minh bạch cho từng cuộc thi.</div>
-          </div>
-        </div>
-        
-        <div className="feature-card">
-          <div className="feature-icon-container" style={{ backgroundColor: '#fef3c7', color: '#d97706' }}>
-            <Award size={22} />
-          </div>
-          <div>
-            <div className="feature-title">Nhiều cuộc thi</div>
-            <div className="feature-desc">Đa dạng format: thi cá nhân và đồng đội chuyên nghiệp.</div>
-          </div>
-        </div>
-        
-        <div className="feature-card">
-          <div className="feature-icon-container" style={{ backgroundColor: '#e0f2fe', color: '#0284c7' }}>
-            <Users size={22} />
-          </div>
-          <div>
-            <div className="feature-title">Cộng đồng lập trình</div>
-            <div className="feature-desc">Thảo luận, học hỏi và chia sẻ kinh nghiệm.</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Two Column details section */}
+      {/* Below: 3 columns */}
       <div className="home-section-grid">
-        
-        {/* Left Column: Contests list */}
+
         <div id="contests-section">
           <div className="home-section-header">
             <h3 className="home-section-title">
@@ -384,20 +371,15 @@ export const HomePage: React.FC = () => {
             </h3>
             <div className="flex items-center gap-3">
               {isAdmin && (
-                <button 
-                  onClick={() => setShowCreateModal(true)} 
+                <button
+                  onClick={() => setShowCreateModal(true)}
                   className="btn btn-primary flex items-center gap-1.5"
                   style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', backgroundColor: '#2563eb', borderRadius: '6px' }}
                 >
                   <Plus size={14} /> Tạo cuộc thi
                 </button>
               )}
-              <Link 
-                to="/contests"
-                className="home-section-link"
-              >
-                Xem tất cả
-              </Link>
+              <Link to="/contests" className="home-section-link">Xem tất cả</Link>
             </div>
           </div>
 
@@ -415,39 +397,32 @@ export const HomePage: React.FC = () => {
 
           {!isLoading && (
             <div>
-              {contestsToRender.map((contest: any) => {
+              {contestsToRender.length === 0 ? (
+                <div className="panel" style={{ padding: '2rem', textAlign: 'center' }}>
+                  <div style={{ color: 'var(--text-muted)', fontWeight: 650, marginBottom: '0.5rem' }}>Chưa có cuộc thi nào</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Hãy chạy seed để tạo dữ liệu demo.</div>
+                </div>
+              ) : contestsToRender.map((contest: any) => {
                 const isUpcoming = new Date(contest.start_time) > new Date();
                 const isEnded = new Date(contest.end_time) < new Date();
-                
-                let formatText = contest.entry_policy === 'team' 
-                  ? 'Thi đồng đội' 
-                  : contest.entry_policy === 'individual' 
-                  ? 'Thi cá nhân' 
-                  : 'Cả hai';
-                if (contest.isMock) {
-                  formatText = contest.mode;
-                }
-                
-                const locationText = contest.isMock ? contest.location : 'Online';
-                const statusBadgeStyle = isUpcoming 
-                  ? { backgroundColor: '#f1f5f9', color: '#475569' } 
-                  : isEnded 
-                  ? { backgroundColor: '#fee2e2', color: '#dc2626' } 
-                  : { backgroundColor: '#dcfce7', color: '#16a34a' };
 
-                const statusText = isUpcoming ? 'Sắp diễn ra' : isEnded ? 'Đã kết thúc' : 'Đang diễn ra';
+                const formatText = contest.entry_policy === 'team'
+                  ? 'Thi đồng đội'
+                  : contest.entry_policy === 'individual'
+                    ? 'Thi cá nhân'
+                    : 'Cả hai';
+
+                const locationText = 'Online';
 
                 return (
                   <div key={contest.id} className="contest-row-card">
-                    <div className="contest-row-thumb">
-                      AI OLP
-                    </div>
-                    
+                    <div className="contest-row-thumb">AI OLP</div>
+
                     <div className="contest-row-details">
                       <div className="contest-row-title-container">
                         <h4 className="contest-row-title">{contest.title}</h4>
-                        <span 
-                          className="badge" 
+                        <span
+                          className="badge"
                           style={{
                             fontSize: '0.7rem',
                             padding: '0.15rem 0.45rem',
@@ -461,7 +436,7 @@ export const HomePage: React.FC = () => {
                           {formatText}
                         </span>
                       </div>
-                      
+
                       <div className="contest-row-meta">
                         <span className="contest-row-meta-item">
                           <Clock size={13} style={{ color: '#94a3b8' }} />
@@ -475,41 +450,23 @@ export const HomePage: React.FC = () => {
                     </div>
 
                     <div className="contest-row-action">
-                      {contest.isMock ? (
-                        <button 
-                          disabled
-                          className="btn" 
-                          style={{
-                            ...statusBadgeStyle,
-                            padding: '0.45rem 0.9rem',
-                            fontSize: '0.8rem',
-                            fontWeight: 600,
-                            borderRadius: '6px',
-                            cursor: 'default',
-                            border: 'none'
-                          }}
-                        >
-                          {statusText}
-                        </button>
-                      ) : (
-                        <Link 
-                          to={`/contests/${contest.id}`} 
-                          className="btn"
-                          style={{
-                            backgroundColor: isEnded || isUpcoming ? '#f1f5f9' : '#2563eb',
-                            color: isEnded || isUpcoming ? '#475569' : '#ffffff',
-                            padding: '0.45rem 0.9rem',
-                            fontSize: '0.8rem',
-                            fontWeight: 600,
-                            borderRadius: '6px',
-                            border: 'none',
-                            textDecoration: 'none',
-                            display: 'inline-block'
-                          }}
-                        >
-                          {isUpcoming ? 'Chi tiết' : isEnded ? 'Bảng điểm' : 'Vào thi'}
-                        </Link>
-                      )}
+                      <Link
+                        to={`/contests/${contest.id}`}
+                        className="btn"
+                        style={{
+                          backgroundColor: isEnded || isUpcoming ? '#f1f5f9' : '#2563eb',
+                          color: isEnded || isUpcoming ? '#475569' : '#ffffff',
+                          padding: '0.45rem 0.9rem',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          borderRadius: '6px',
+                          border: 'none',
+                          textDecoration: 'none',
+                          display: 'inline-block'
+                        }}
+                      >
+                        {isUpcoming ? 'Chi tiết' : isEnded ? 'Bảng điểm' : 'Vào thi'}
+                      </Link>
                     </div>
                   </div>
                 );
@@ -518,28 +475,24 @@ export const HomePage: React.FC = () => {
           )}
         </div>
 
-        {/* Right Column: Exercises list */}
         <div id="exercises-section">
           <div className="home-section-header">
             <h3 className="home-section-title">
               <Code2 size={18} style={{ color: '#2563eb' }} />
               Bài tập mới
             </h3>
-            <Link 
-              to="/problems"
-              className="home-section-link"
-            >
-              Xem tất cả
-            </Link>
+            <Link to="/problems" className="home-section-link">Xem tất cả</Link>
           </div>
 
           <div className="exercise-list">
-            {exercisesToRender.map((exercise) => {
-              const diffColor = exercise.difficulty === 'Easy' 
-                ? { bg: '#f0fdf4', text: '#16a34a' } 
-                : exercise.difficulty === 'Medium' 
-                ? { bg: '#fffbeb', text: '#d97706' } 
-                : { bg: '#fef2f2', text: '#dc2626' };
+            {exercisesToRender.length === 0 ? (
+              <div style={{ padding: '1.25rem', color: 'var(--text-muted)' }}>Chưa có bài tập.</div>
+            ) : exercisesToRender.map((exercise) => {
+              const diffColor = exercise.difficulty === 'Easy'
+                ? { bg: '#f0fdf4', text: '#16a34a' }
+                : exercise.difficulty === 'Medium'
+                  ? { bg: '#fffbeb', text: '#d97706' }
+                  : { bg: '#fef2f2', text: '#dc2626' };
 
               return (
                 <div key={exercise.id} className="exercise-row">
@@ -553,7 +506,7 @@ export const HomePage: React.FC = () => {
                   </div>
 
                   <div style={{ textAlign: 'center' }}>
-                    <span 
+                    <span
                       style={{
                         backgroundColor: diffColor.bg,
                         color: diffColor.text,
@@ -581,6 +534,67 @@ export const HomePage: React.FC = () => {
                 </div>
               );
             })}
+          </div>
+        </div>
+
+        <div>
+          <div className="home-section-header">
+            <h3 className="home-section-title">
+              <Trophy size={18} style={{ color: '#2563eb' }} />
+              Thống kê
+            </h3>
+          </div>
+
+          <div className="panel" style={{ marginBottom: 0, padding: '1.25rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2563eb' }}>
+                    <Users size={18} />
+                  </div>
+                  <div style={{ color: 'var(--text-muted)', fontWeight: 650 }}>Thí sinh</div>
+                </div>
+                <div style={{ fontWeight: 800, fontSize: '1.1rem' }}>{contestantCount.toLocaleString('en-US')}</div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#16a34a' }}>
+                    <Trophy size={18} />
+                  </div>
+                  <div style={{ color: 'var(--text-muted)', fontWeight: 650 }}>Cuộc thi</div>
+                </div>
+                <div style={{ fontWeight: 800, fontSize: '1.1rem' }}>{contestCount.toLocaleString('en-US')}</div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: '#faf5ff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#7c3aed' }}>
+                    <Code2 size={18} />
+                  </div>
+                  <div style={{ color: 'var(--text-muted)', fontWeight: 650 }}>Bài tập</div>
+                </div>
+                <div style={{ fontWeight: 800, fontSize: '1.1rem' }}>{problemCount.toLocaleString('en-US')}</div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: '#fff7ed', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ea580c' }}>
+                    <UploadCloud size={18} />
+                  </div>
+                  <div style={{ color: 'var(--text-muted)', fontWeight: 650 }}>Lượt nộp</div>
+                </div>
+                <div style={{ fontWeight: 800, fontSize: '1.1rem' }}>{submissionCount.toLocaleString('en-US')}</div>
+              </div>
+
+              <Link
+                to="/newsfeed"
+                className="home-section-link"
+                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}
+              >
+                <Newspaper size={16} /> Xem Newsfeed
+              </Link>
+            </div>
           </div>
         </div>
 

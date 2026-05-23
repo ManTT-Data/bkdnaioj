@@ -18,6 +18,7 @@ type Querier interface {
 	CountActiveEntries(ctx context.Context) (int64, error)
 	CountContests(ctx context.Context) (int64, error)
 	CountSubmissions(ctx context.Context) (int64, error)
+	CountTasks(ctx context.Context) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	// Announcements
 	CreateAnnouncement(ctx context.Context, arg CreateAnnouncementParams) (Announcement, error)
@@ -58,6 +59,7 @@ type Querier interface {
 	GetTaskByID(ctx context.Context, id uuid.UUID) (Task, error)
 	// Task-phase leaderboard
 	GetTaskPhaseLeaderboard(ctx context.Context, arg GetTaskPhaseLeaderboardParams) ([]GetTaskPhaseLeaderboardRow, error)
+	GetTaskSubmissionStats(ctx context.Context) ([]GetTaskSubmissionStatsRow, error)
 	GetTeamByID(ctx context.Context, id uuid.UUID) (Team, error)
 	GetTeamBySlug(ctx context.Context, slug string) (Team, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
