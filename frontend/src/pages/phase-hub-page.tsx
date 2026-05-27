@@ -2,10 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
-import { api, type Contest, type PhaseDef, type Task, type Phase, type ContestEntry, type Submission, type LeaderboardRow, type Clarification, type Announcement, type Ticket, type Team } from '../lib/api-client';
+import { api, API_BASE_URL, type Contest, type PhaseDef, type Task, type Phase, type ContestEntry, type Submission, type LeaderboardRow, type Clarification, type Announcement, type Ticket, type Team } from '../lib/api-client';
 import { useAuth } from '../contexts/auth-context';
 import {
-  FileText, UploadCloud, Play, AlertCircle, RefreshCw, ArrowLeft, Star, Volume2, ShieldAlert, Lock, Unlock, Settings
+  FileText, UploadCloud, Play, RefreshCw, ArrowLeft, Star, Volume2, ShieldAlert, Lock, Unlock, Settings
 } from 'lucide-react';
 
 const formatParticipantName = (row: { display_name: string; entry_type: string; user_emails?: string[] }) => {
@@ -36,6 +36,13 @@ export const PhaseHubPage: React.FC = () => {
   const { contestId, phaseKey } = useParams<{ contestId: string, phaseKey: string }>();
   const { user, isAdmin, isJury } = useAuth();
   const queryClient = useQueryClient();
+
+  const getPdfUrl = (url: string | null | undefined) => {
+    if (!url) return '';
+    if (url.startsWith('http')) return url;
+    const apiBase = API_BASE_URL.endsWith('/api/v1') ? API_BASE_URL.slice(0, -7) : API_BASE_URL;
+    return `${apiBase}${url}`;
+  };
 
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
@@ -91,6 +98,9 @@ export const PhaseHubPage: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState<'idle' | 'initiating' | 'uploading' | 'completing' | 'done' | 'failed'>('idle');
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const [uploadingPdf, setUploadingPdf] = useState(false);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
 
   // Q&A Form State
   const [qaQuestion, setQaQuestion] = useState('');
@@ -399,6 +409,29 @@ export const PhaseHubPage: React.FC = () => {
     }
   });
 
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedTaskId) return;
+    if (file.type !== 'application/pdf') {
+      alert('Chỉ chấp nhận tệp định dạng PDF.');
+      return;
+    }
+    try {
+      setUploadingPdf(true);
+      await api.uploadTaskStatement(selectedTaskId, file);
+      queryClient.invalidateQueries({ queryKey: ['tasks', contestId] });
+      alert('Tải lên đề bài PDF thành công!');
+    } catch (err) {
+      const error = err as { response?: { data?: { message?: string } } };
+      alert(error?.response?.data?.message || 'Không thể tải lên tệp đề bài.');
+    } finally {
+      setUploadingPdf(false);
+      if (pdfInputRef.current) {
+        pdfInputRef.current.value = '';
+      }
+    }
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setSelectedFile(e.target.files[0]);
@@ -608,139 +641,194 @@ export const PhaseHubPage: React.FC = () => {
 
       {/* Problems/Tasks Tab */}
       {activeTab === 'problems' && (
-        <div className="grid-3-1" style={{ gridTemplateColumns: '1fr 3fr' }}>
-          {/* Sidebar: tasks list */}
-          <div className="flex flex-col gap-2">
-            <h4 style={{ fontSize: '0.85rem', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Tasks</h4>
+        <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr 380px', gap: '1.5rem', alignItems: 'start' }}>
+          {/* 1. Left Column: Sidebar tasks list */}
+          <div className="flex flex-col gap-2" style={{ width: '260px', flexShrink: 0 }}>
+            <h4 style={{ fontSize: '0.85rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.25rem', fontWeight: 750 }}>
+              Danh sách bài tập
+            </h4>
             {tasks.map(t => (
               <button
                 key={t.id}
                 onClick={() => handleTaskChange(t.id)}
                 className={`btn ${selectedTaskId === t.id ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ justifyContent: 'flex-start', textAlign: 'left', width: '100%' }}
+                style={{ justifyContent: 'flex-start', textAlign: 'left', width: '100%', padding: '0.6rem 0.8rem', gap: '0.6rem', border: selectedTaskId === t.id ? 'none' : '1px solid hsl(var(--border))' }}
               >
                 <FileText size={16} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.875rem' }}>
                   {t.title}
                 </span>
               </button>
             ))}
           </div>
 
-          {/* Details & Upload panel */}
-          <div>
+          {/* 2. Middle Column: Task Title & PDF Viewer */}
+          <div className="panel" style={{ padding: '1.5rem', minHeight: '650px', display: 'flex', flexDirection: 'column', margin: 0, flex: 1 }}>
             {selectedTask ? (
-              <div className="panel">
-                <div className="panel-header">
-                  <h2 style={{ margin: 0 }}>{selectedTask.title}</h2>
-                  <div className="badge badge-info">{selectedTask.score_label}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: '1rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid hsl(var(--border))', paddingBottom: '0.75rem' }}>
+                  <div style={{ flex: 1 }}>
+                    <h2 style={{ fontSize: '1.35rem', margin: 0, fontWeight: 750, color: 'hsl(var(--text-main))' }}>{selectedTask.title}</h2>
+                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.3rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <span className="badge badge-info" style={{ fontSize: '0.7rem', padding: '0.15rem 0.45rem' }}>
+                        {selectedTask.score_label}
+                      </span>
+                      <span style={{ fontSize: '0.75rem', color: 'hsl(var(--text-muted))' }}>
+                        Điểm số: {selectedTask.higher_is_better ? 'Càng cao càng tốt' : 'Càng thấp càng tốt'}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  {/* PDF Upload Button for Organizers */}
+                  {(isAdmin || isJury) && (
+                    <div style={{ marginLeft: '1rem' }}>
+                      <input
+                        type="file"
+                        ref={pdfInputRef}
+                        accept="application/pdf"
+                        style={{ display: 'none' }}
+                        onChange={handlePdfUpload}
+                      />
+                      <button
+                        onClick={() => pdfInputRef.current?.click()}
+                        className="btn btn-secondary flex items-center gap-1.5"
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }}
+                        disabled={uploadingPdf}
+                      >
+                        <UploadCloud size={14} />
+                        {selectedTask.problem_statement_url ? 'Cập nhật PDF' : 'Tải lên PDF'}
+                      </button>
+                    </div>
+                  )}
                 </div>
 
-                <div style={{ marginBottom: '1.5rem', whiteSpace: 'pre-line' }}>
-                  {selectedTask.description || 'No detailed description provided for this task.'}
-                </div>
+                {/* Task Description Text if provided */}
+                {selectedTask.description && (
+                  <div style={{ padding: '0.75rem 1rem', backgroundColor: 'hsl(var(--background))', borderRadius: 'var(--radius)', fontSize: '0.875rem', color: 'hsl(var(--text-muted))', border: '1px solid hsl(var(--border))' }}>
+                    <div style={{ fontWeight: 650, color: 'hsl(var(--text-main))', marginBottom: '0.25rem' }}>Mô tả bài tập:</div>
+                    <div style={{ whiteSpace: 'pre-line', lineHeight: '1.5' }}>
+                      {selectedTask.description}
+                    </div>
+                  </div>
+                )}
 
-                {selectedTask.problem_statement_url && (
-                  <div style={{ marginBottom: '1.5rem' }}>
-                    <strong>Problem Resource:</strong>{' '}
-                    <a href={selectedTask.problem_statement_url} target="_blank" rel="noreferrer">
-                      View/Download Dataset & Guidelines
+                {/* Dataset URL if provided */}
+                {selectedTask.dataset_url && (
+                  <div style={{ padding: '0.75rem 1rem', backgroundColor: 'hsl(var(--background))', borderRadius: 'var(--radius)', fontSize: '0.875rem', border: '1px solid hsl(var(--border))' }}>
+                    <span style={{ fontWeight: 650, color: 'hsl(var(--text-main))' }}>Link dữ liệu huấn luyện (Dataset): </span>
+                    <a href={selectedTask.dataset_url} target="_blank" rel="noreferrer" style={{ textDecoration: 'underline', color: 'hsl(var(--primary))' }}>
+                      {selectedTask.dataset_url}
                     </a>
                   </div>
                 )}
 
-                <div style={{ padding: '0.75rem', backgroundColor: 'var(--background)', borderRadius: 'var(--radius)', fontSize: '0.85rem', marginBottom: '2rem' }}>
-                  <div className="flex gap-4" style={{ flexWrap: 'wrap' }}>
-                    <div><strong>Score Direction:</strong> {selectedTask.higher_is_better ? 'Higher is better' : 'Lower is better'}</div>
-                    {activePhase && (() => {
-                      const times = getPhaseTimes(activePhase);
-                      if (!times) return null;
-                      return (
-                        <>
-                          <div><strong>Submission Limit:</strong> {activePhase.submission_limit || 'Unlimited'}</div>
-                          <div><strong>Scoreboard:</strong> {activePhase.leaderboard_mode} mode</div>
-                          <div><strong>Timeline:</strong> <span className="badge badge-secondary" style={{ textTransform: 'capitalize' }}>{userEntry?.entry_mode || 'Jury'} Mode</span></div>
-                          <div><strong>Open Time:</strong> {times.openTime.toLocaleString()}</div>
-                          {userEntry?.entry_mode !== 'practice' && (
-                            <div><strong>Close Time:</strong> {times.closeTime.toLocaleString()}</div>
-                          )}
-                        </>
-                      );
-                    })()}
-                  </div>
-                </div>
+                {/* PDF Viewer Window */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '520px', border: '1px solid hsl(var(--border))', borderRadius: 'var(--radius)', overflow: 'hidden', backgroundColor: 'hsl(var(--background))', position: 'relative' }}>
+                  {uploadingPdf && (
+                    <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255,255,255,0.7)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}>
+                      <div className="spinner" style={{ marginBottom: '0.5rem' }}></div>
+                      <span style={{ fontSize: '0.85rem', color: 'hsl(var(--text-muted))', fontWeight: 600 }}>Đang tải lên đề bài...</span>
+                    </div>
+                  )}
 
-                {/* Upload section */}
+                  {selectedTask.problem_statement_url ? (
+                    <iframe
+                      src={getPdfUrl(selectedTask.problem_statement_url)}
+                      width="100%"
+                      height="100%"
+                      style={{ border: 'none', minHeight: '550px', flex: 1 }}
+                      title="Problem Statement PDF"
+                    />
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, padding: '3rem', textAlign: 'center', color: 'hsl(var(--text-muted))' }}>
+                      <FileText size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                      <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 650 }}>Chưa có đề bài PDF</h4>
+                      <p style={{ fontSize: '0.8rem', marginTop: '0.25rem', maxWidth: '300px' }}>
+                        {(isAdmin || isJury) 
+                          ? 'Vui lòng nhấn nút "Tải lên PDF" ở góc trên bên phải để cập nhật file đề bài cho thí sinh.' 
+                          : 'Ban tổ chức chưa cập nhật tệp đề bài PDF cho bài tập này.'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: 'hsl(var(--text-muted))' }}>
+                <p>Vui lòng chọn bài tập từ danh sách bên trái.</p>
+              </div>
+            )}
+          </div>
+
+          {/* 3. Right Column: Submit & Task-specific History */}
+          <div className="flex flex-col gap-4" style={{ width: '380px', flexShrink: 0 }}>
+            {selectedTask && (
+              <div className="panel" style={{ padding: '1.25rem', margin: 0 }}>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 750, margin: '0 0 1rem 0', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <UploadCloud size={18} style={{ color: 'hsl(var(--primary))' }} />
+                  Nộp bài giải (Submit)
+                </h3>
+                
                 {activePhase ? (() => {
                   const times = getPhaseTimes(activePhase);
                   if (!times) return null;
- 
+
                   if (times.isLocked) {
                     return (
-                      <div className="alert alert-warning" style={{ marginTop: '1rem' }}>
-                        This phase will open at <strong>{times.openTime.toLocaleString()}</strong>. Submissions are currently locked.
+                      <div className="alert alert-warning" style={{ margin: 0, fontSize: '0.8rem', padding: '0.75rem' }}>
+                        Vòng thi chưa mở. Sẽ mở vào lúc <strong>{times.openTime.toLocaleString()}</strong>.
                       </div>
                     );
                   }
- 
+
                   if (times.isEnded) {
                     return (
-                      <div className="alert alert-danger" style={{ marginTop: '1rem' }}>
-                        This phase ended at <strong>{times.closeTime.toLocaleString()}</strong>. Submissions are closed.
+                      <div className="alert alert-danger" style={{ margin: 0, fontSize: '0.8rem', padding: '0.75rem' }}>
+                        Thời gian thi đã kết thúc vào lúc <strong>{times.closeTime.toLocaleString()}</strong>. Cổng nộp bài đã đóng.
                       </div>
                     );
                   }
 
                   if (!userEntry) {
                     return (
-                      <div className="alert alert-warning flex items-center gap-2" style={{ marginTop: '1rem' }}>
-                        <ShieldAlert size={18} />
-                        <div>
-                          <strong>Chưa đăng ký tham gia:</strong> Bạn chưa đăng ký tham gia cuộc thi này hoặc không thuộc đội thi hợp lệ. Vui lòng đăng ký tham gia trước khi nộp bài.
-                          <br />
-                          <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>
-                            <strong>Not registered:</strong> You are not registered for this contest or do not belong to a valid team. Please register first.
-                          </span>
-                        </div>
+                      <div className="alert alert-warning" style={{ margin: 0, fontSize: '0.8rem', padding: '0.75rem', lineHeight: '1.4' }}>
+                        <strong>Chưa đăng ký:</strong> Bạn chưa đăng ký tham gia hoặc không thuộc đội thi hợp lệ. Vui lòng đăng ký tham gia trước khi nộp bài.
                       </div>
                     );
                   }
 
+                  const contract = contractForPhase(selectedTask, activePhase.is_final);
+                  const examples = contract?.examples || [];
+
                   return (
-                    <div>
-                      <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>
-                        {activePhase.is_final ? 'Submit Final Artifact' : 'Submit Output Artifact'}
-                      </h3>
-                      {(() => {
-                        const contract = contractForPhase(selectedTask, activePhase.is_final);
-                        const examples = contract?.examples || [];
-                        return (
-                          <div className="alert alert-info" style={{ marginBottom: '1rem' }}>
-                            <div style={{ fontWeight: 700, marginBottom: '0.25rem' }}>Submission contract</div>
-                            <div>{contract?.description || (activePhase.is_final ? 'Upload checkpoint/code inference artifact required by the task.' : 'Upload output artifact required by the task.')}</div>
-                            {examples.length > 0 && (
-                              <div style={{ marginTop: '0.4rem', fontSize: '0.85rem' }}>
-                                Examples: <span className="font-mono">{examples.join(', ')}</span>
-                              </div>
-                            )}
+                    <div className="flex flex-col gap-3">
+                      <div style={{ padding: '0.6rem 0.8rem', backgroundColor: 'hsla(var(--primary), 0.05)', border: '1px solid hsl(var(--border-dark))', borderRadius: 'var(--radius)', fontSize: '0.785rem', color: 'hsl(var(--text-main))', lineHeight: '1.4' }}>
+                        <div style={{ fontWeight: 700, marginBottom: '0.15rem' }}>Quy định tệp nộp:</div>
+                        <div>{contract?.description || (activePhase.is_final ? 'Yêu cầu nộp checkpoint mô hình hoặc mã nguồn chạy.' : 'Yêu cầu nộp file kết quả dự đoán của bài tập.')}</div>
+                        {examples.length > 0 && (
+                          <div style={{ marginTop: '0.25rem', fontFamily: 'var(--font-mono)', opacity: 0.9 }}>
+                            Ví dụ: {examples.join(', ')}
                           </div>
-                        );
-                      })()}
+                        )}
+                      </div>
+
                       {uploadError && (
-                        <div className="alert alert-danger flex items-center gap-2">
-                          <AlertCircle size={18} />
-                          <div>{uploadError}</div>
+                        <div className="alert alert-danger" style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem', margin: 0 }}>
+                          {uploadError}
                         </div>
                       )}
 
-                      <div className="dropzone" onClick={() => fileInputRef.current?.click()}>
-                        <UploadCloud size={36} className="text-muted" style={{ margin: '0 auto 1rem auto', display: 'block' }} />
-                        <p style={{ fontWeight: 600 }}>
-                          Click to select your submission artifact
-                        </p>
-                        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                          Any file type accepted when it matches the task contract
-                        </p>
+                      <div 
+                        className="dropzone" 
+                        onClick={() => fileInputRef.current?.click()}
+                        style={{ padding: '1.25rem 1rem', border: '2px dashed hsl(var(--border-dark))', borderRadius: 'var(--radius)', textAlign: 'center', cursor: 'pointer', backgroundColor: 'hsl(var(--background))' }}
+                      >
+                        <UploadCloud size={28} style={{ color: 'hsl(var(--text-muted))', margin: '0 auto 0.5rem auto' }} />
+                        <span style={{ fontSize: '0.8rem', fontWeight: 650, display: 'block', color: 'hsl(var(--text-main))' }}>
+                          Chọn file bài làm của bạn
+                        </span>
+                        <span style={{ fontSize: '0.7rem', color: 'hsl(var(--text-muted))', marginTop: '0.15rem', display: 'block' }}>
+                          Kéo thả hoặc click để duyệt file
+                        </span>
                         <input
                           type="file"
                           ref={fileInputRef}
@@ -750,38 +838,111 @@ export const PhaseHubPage: React.FC = () => {
                       </div>
 
                       {selectedFile && (
-                        <div style={{ marginTop: '1rem', padding: '0.75rem', border: '1px solid hsl(var(--border))', borderRadius: 'var(--radius)', backgroundColor: 'var(--background)' }} className="flex justify-between items-center">
-                          <div className="font-mono" style={{ fontSize: '0.85rem' }}>
+                        <div style={{ padding: '0.6rem 0.75rem', border: '1px solid hsl(var(--border))', borderRadius: 'var(--radius)', backgroundColor: 'hsl(var(--panel))', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                          <span className="font-mono" style={{ fontSize: '0.785rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, color: 'hsl(var(--text-main))' }}>
                             {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
-                          </div>
+                          </span>
                           <button
                             onClick={triggerUpload}
-                            className="btn btn-primary flex items-center gap-2"
+                            className="btn btn-primary flex items-center gap-1"
+                            style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', height: 'auto', borderRadius: '4px' }}
                             disabled={uploadProgress !== 'idle'}
                           >
-                            <Play size={14} /> Submit
+                            <Play size={12} /> Nộp
                           </button>
                         </div>
                       )}
 
                       {uploadProgress !== 'idle' && (
-                        <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
-                          <div className="spinner" style={{ margin: '0 auto 0.5rem auto' }}></div>
-                          <p className="font-mono" style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                            Status: <span style={{ textTransform: 'uppercase', fontWeight: 600 }}>{uploadProgress}</span>
-                          </p>
+                        <div style={{ textAlign: 'center', padding: '0.5rem 0' }}>
+                          <div className="spinner" style={{ margin: '0 auto 0.4rem auto', width: '1.2rem', height: '1.2rem', borderWidth: '2px' }}></div>
+                          <span className="font-mono text-muted" style={{ fontSize: '0.75rem' }}>
+                            Trạng thái: {uploadProgress.toUpperCase()}
+                          </span>
                         </div>
                       )}
                     </div>
                   );
                 })() : (
-                  <div className="alert alert-danger">
-                    No phase configurations found for this task in the current contest window.
+                  <div className="alert alert-danger" style={{ fontSize: '0.8rem', padding: '0.75rem', margin: 0 }}>
+                    Không tìm thấy cấu hình vòng thi cho bài tập này.
                   </div>
                 )}
               </div>
-            ) : (
-              <p>Please select a task from the sidebar.</p>
+            )}
+
+            {/* Submission History Box */}
+            {selectedTask && (
+              <div className="panel" style={{ padding: '1.25rem', margin: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 750, margin: 0, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <Star size={18} style={{ color: 'hsl(var(--warning))' }} />
+                  Lịch sử nộp bài
+                </h3>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '350px', overflowY: 'auto', paddingRight: '0.2rem' }}>
+                  {submissions.filter(s => s.task_id === selectedTaskId).length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'hsl(var(--text-muted))', fontSize: '0.8rem' }}>
+                      Chưa nộp bài giải cho thử thách này.
+                    </div>
+                  ) : (
+                    submissions
+                      .filter(s => s.task_id === selectedTaskId)
+                      .sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime())
+                      .map(sub => (
+                        <div 
+                          key={sub.id} 
+                          style={{ 
+                            padding: '0.75rem', 
+                            borderRadius: 'var(--radius)', 
+                            border: '1px solid hsl(var(--border))', 
+                            backgroundColor: sub.is_final ? 'hsl(var(--success-bg))' : 'hsl(var(--panel))',
+                            borderLeft: sub.is_final ? '4px solid hsl(var(--success))' : '1px solid hsl(var(--border))',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.4rem',
+                            transition: 'all 0.15s ease',
+                            boxShadow: 'var(--shadow-sm)'
+                          }}
+                        >
+                          <div className="flex justify-between items-center">
+                            <span className="font-mono text-muted" style={{ fontSize: '0.75rem' }}>
+                              {new Date(sub.submitted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} {new Date(sub.submitted_at).toLocaleDateString([], { day: '2-digit', month: '2-digit' })}
+                            </span>
+                            {getStatusBadge(sub.status)}
+                          </div>
+                          
+                          <div className="flex justify-between items-center" style={{ marginTop: '0.1rem' }}>
+                            <div style={{ fontSize: '0.85rem', color: 'hsl(var(--text-muted))' }}>
+                              Điểm: <strong style={{ fontSize: '0.95rem', color: 'hsl(var(--text-main))' }}>
+                                {sub.status === 'done' ? (sub.display_score || '0.00') : '-'}
+                              </strong>
+                            </div>
+                            
+                            <div className="flex items-center gap-1.5">
+                              {sub.is_final ? (
+                                <span 
+                                  className="badge badge-success flex items-center gap-1" 
+                                  style={{ padding: '0.15rem 0.4rem', fontSize: '0.65rem', textTransform: 'uppercase', fontWeight: 700 }}
+                                >
+                                  <Star size={8} fill="currentColor" /> Chính thức
+                                </span>
+                              ) : sub.status === 'done' ? (
+                                <button
+                                  onClick={() => markFinalMutation.mutate(sub.id)}
+                                  className="btn btn-secondary"
+                                  style={{ padding: '0.15rem 0.4rem', fontSize: '0.65rem', height: 'auto' }}
+                                  disabled={markFinalMutation.isPending}
+                                >
+                                  Chọn nộp
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </div>
             )}
           </div>
         </div>

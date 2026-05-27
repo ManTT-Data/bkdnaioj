@@ -29,7 +29,7 @@ func TestTaskHandler_Create_Success(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewTaskHandler(mock)
+	h := NewTaskHandler(mock, nil)
 	body := `{"slug":"task-a","title":"Task A","score_label":"RMSE","higher_is_better":false,"sort_order":1}`
 	c, rec := newTestContext("POST", "/api/v1/contests/"+contestID.String()+"/tasks", body)
 	c.SetParamNames("id")
@@ -48,7 +48,7 @@ func TestTaskHandler_Create_DuplicateSlug(t *testing.T) {
 			return db.Task{}, &pgconn.PgError{Code: "23505"}
 		},
 	}
-	h := NewTaskHandler(mock)
+	h := NewTaskHandler(mock, nil)
 	body := `{"slug":"task-a","title":"Task A","score_label":"RMSE","higher_is_better":false,"sort_order":1}`
 	c, _ := newTestContext("POST", "/api/v1/contests/"+contestID.String()+"/tasks", body)
 	c.SetParamNames("id")
@@ -69,7 +69,7 @@ func TestTaskHandler_ListByContest_Success(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewTaskHandler(mock)
+	h := NewTaskHandler(mock, nil)
 	c, rec := newTestContext("GET", "/api/v1/contests/"+contestID.String()+"/tasks", "")
 	c.SetParamNames("id")
 	c.SetParamValues(contestID.String())
@@ -87,7 +87,7 @@ func TestTaskHandler_Get_Success(t *testing.T) {
 			return db.Task{ID: taskID, ContestID: uuid.New(), Slug: "task-a", Title: "Task A", ScoreLabel: "RMSE"}, nil
 		},
 	}
-	h := NewTaskHandler(mock)
+	h := NewTaskHandler(mock, nil)
 	c, rec := newTestContext("GET", "/api/v1/tasks/"+taskID.String(), "")
 	c.SetParamNames("id")
 	c.SetParamValues(taskID.String())
@@ -105,7 +105,7 @@ func TestTaskHandler_Get_NotFound(t *testing.T) {
 			return db.Task{}, pgx.ErrNoRows
 		},
 	}
-	h := NewTaskHandler(mock)
+	h := NewTaskHandler(mock, nil)
 	c, _ := newTestContext("GET", "/api/v1/tasks/"+taskID.String(), "")
 	c.SetParamNames("id")
 	c.SetParamValues(taskID.String())
@@ -123,7 +123,7 @@ func TestTaskHandler_Delete_Success(t *testing.T) {
 			return nil
 		},
 	}
-	h := NewTaskHandler(mock)
+	h := NewTaskHandler(mock, nil)
 	c, rec := newTestContext("DELETE", "/api/v1/tasks/"+taskID.String(), "")
 	c.SetParamNames("id")
 	c.SetParamValues(taskID.String())

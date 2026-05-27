@@ -1,8 +1,8 @@
 -- name: CreateTask :one
 INSERT INTO tasks (
   contest_id, slug, title, description, problem_statement_url,
-  submission_schema, score_label, higher_is_better, sort_order
-) VALUES ($1, $2, $3, $4, $5, $6::varchar::jsonb, $7, $8, $9)
+  submission_schema, score_label, higher_is_better, sort_order, dataset_url
+) VALUES ($1, $2, $3, $4, $5, $6::varchar::jsonb, $7, $8, $9, $10)
 RETURNING *;
 
 -- name: GetTaskByID :one
@@ -20,6 +20,7 @@ UPDATE tasks SET
   score_label = COALESCE(sqlc.narg('score_label'), score_label),
   higher_is_better = COALESCE(sqlc.narg('higher_is_better'), higher_is_better),
   sort_order = COALESCE(sqlc.narg('sort_order'), sort_order),
+  dataset_url = COALESCE(sqlc.narg('dataset_url'), dataset_url),
   updated_at = now()
 WHERE id = $1
 RETURNING *;

@@ -51,7 +51,7 @@ func NewRouter(d *Deps) *echo.Echo {
 	registerTeams(api, q, d.JWTMgr)
 	registerContests(api, q, d.JWTMgr)
 	registerPhaseDefs(api, q, d.JWTMgr)
-	registerTasks(api, q, d.JWTMgr)
+	registerTasks(api, q, d.JWTMgr, d.Storage)
 	registerEvaluationSets(api, q, d.JWTMgr, d.Storage)
 	registerPhases(api, q, d.JWTMgr, d.Storage)
 	registerEntries(api, q, d.JWTMgr)
@@ -116,14 +116,19 @@ func registerPhaseDefs(api *echo.Group, q *db.Queries, jwtMgr *security.JWTManag
 	admin.DELETE("/:def_id", h.Delete)
 }
 
-func registerTasks(api *echo.Group, q *db.Queries, jwtMgr *security.JWTManager) {
-	h := handlers.NewTaskHandler(q)
+func registerTasks(api *echo.Group, q *db.Queries, jwtMgr *security.JWTManager, s3 *storage.S3) {
+	h := handlers.NewTaskHandler(q, s3)
 	api.GET("/contests/:id/tasks", h.ListByContest)
 	api.GET("/tasks/:id", h.Get)
+	api.GET("/tasks/:id/statement", h.GetStatement)
 	admin := api.Group("", mw.JWTAuth(jwtMgr), mw.RequireRole("admin"))
 	admin.POST("/contests/:id/tasks", h.Create)
 	admin.PATCH("/tasks/:id", h.Update)
 	admin.DELETE("/tasks/:id", h.Delete)
+
+	// Support both admin and jury to upload the task statement
+	staff := api.Group("", mw.JWTAuth(jwtMgr), mw.RequireRole("admin", "jury"))
+	staff.POST("/tasks/:id/statement", h.UploadStatement)
 }
 
 func registerEvaluationSets(api *echo.Group, q *db.Queries, jwtMgr *security.JWTManager, s3 *storage.S3) {

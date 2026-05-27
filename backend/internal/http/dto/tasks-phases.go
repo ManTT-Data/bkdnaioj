@@ -21,6 +21,7 @@ type CreateTaskRequest struct {
 	ScoreLabel          string           `json:"score_label" validate:"required,max=120"`
 	HigherIsBetter      bool             `json:"higher_is_better"`
 	SortOrder           int32            `json:"sort_order"`
+	DatasetURL          *string          `json:"dataset_url,omitempty" validate:"omitempty,max=2048"`
 }
 
 type UpdateTaskRequest struct {
@@ -31,6 +32,7 @@ type UpdateTaskRequest struct {
 	ScoreLabel          *string          `json:"score_label,omitempty" validate:"omitempty,max=120"`
 	HigherIsBetter      *bool            `json:"higher_is_better,omitempty"`
 	SortOrder           *int32           `json:"sort_order,omitempty"`
+	DatasetURL          *string          `json:"dataset_url,omitempty" validate:"omitempty,max=2048"`
 }
 
 type TaskResponse struct {
@@ -48,6 +50,7 @@ type TaskResponse struct {
 	HigherIsBetter      bool                `json:"higher_is_better"`
 	SortOrder           int32               `json:"sort_order"`
 	CreatedAt           time.Time           `json:"created_at"`
+	DatasetURL          *string             `json:"dataset_url,omitempty"`
 }
 
 type TaskAssetResponse struct {
@@ -68,7 +71,7 @@ func TaskToResponse(t db.Task) TaskResponse {
 		Description: t.Description, ProblemStatementURL: t.ProblemStatementUrl,
 		SubmissionSchema: t.SubmissionSchema, Assets: nil, AssetKeys: nil, RequiredAssets: []string{"judge.py"}, ScoreLabel: t.ScoreLabel,
 		HigherIsBetter: t.HigherIsBetter, SortOrder: t.SortOrder,
-		CreatedAt: PgTimeVal(t.CreatedAt),
+		CreatedAt: PgTimeVal(t.CreatedAt), DatasetURL: t.DatasetUrl,
 	}
 }
 

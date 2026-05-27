@@ -14,9 +14,9 @@ import (
 const createTask = `-- name: CreateTask :one
 INSERT INTO tasks (
   contest_id, slug, title, description, problem_statement_url,
-  submission_schema, score_label, higher_is_better, sort_order
-) VALUES ($1, $2, $3, $4, $5, $6::varchar::jsonb, $7, $8, $9)
-RETURNING id, contest_id, slug, title, description, problem_statement_url, submission_schema, score_label, higher_is_better, sort_order, created_at, updated_at
+  submission_schema, score_label, higher_is_better, sort_order, dataset_url
+) VALUES ($1, $2, $3, $4, $5, $6::varchar::jsonb, $7, $8, $9, $10)
+RETURNING id, contest_id, slug, title, description, problem_statement_url, submission_schema, score_label, higher_is_better, sort_order, created_at, updated_at, dataset_url
 `
 
 type CreateTaskParams struct {
@@ -29,6 +29,7 @@ type CreateTaskParams struct {
 	ScoreLabel          string    `json:"score_label"`
 	HigherIsBetter      bool      `json:"higher_is_better"`
 	SortOrder           int32     `json:"sort_order"`
+	DatasetUrl          *string   `json:"dataset_url"`
 }
 
 func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, error) {
@@ -42,6 +43,7 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 		arg.ScoreLabel,
 		arg.HigherIsBetter,
 		arg.SortOrder,
+		arg.DatasetUrl,
 	)
 	var i Task
 	err := row.Scan(
@@ -57,6 +59,7 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 		&i.SortOrder,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DatasetUrl,
 	)
 	return i, err
 }
@@ -71,7 +74,7 @@ func (q *Queries) DeleteTask(ctx context.Context, id uuid.UUID) error {
 }
 
 const getTaskByID = `-- name: GetTaskByID :one
-SELECT id, contest_id, slug, title, description, problem_statement_url, submission_schema, score_label, higher_is_better, sort_order, created_at, updated_at FROM tasks WHERE id = $1
+SELECT id, contest_id, slug, title, description, problem_statement_url, submission_schema, score_label, higher_is_better, sort_order, created_at, updated_at, dataset_url FROM tasks WHERE id = $1
 `
 
 func (q *Queries) GetTaskByID(ctx context.Context, id uuid.UUID) (Task, error) {
@@ -90,12 +93,13 @@ func (q *Queries) GetTaskByID(ctx context.Context, id uuid.UUID) (Task, error) {
 		&i.SortOrder,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DatasetUrl,
 	)
 	return i, err
 }
 
 const listTasksByContest = `-- name: ListTasksByContest :many
-SELECT id, contest_id, slug, title, description, problem_statement_url, submission_schema, score_label, higher_is_better, sort_order, created_at, updated_at FROM tasks WHERE contest_id = $1 ORDER BY sort_order
+SELECT id, contest_id, slug, title, description, problem_statement_url, submission_schema, score_label, higher_is_better, sort_order, created_at, updated_at, dataset_url FROM tasks WHERE contest_id = $1 ORDER BY sort_order
 `
 
 func (q *Queries) ListTasksByContest(ctx context.Context, contestID uuid.UUID) ([]Task, error) {
@@ -120,6 +124,7 @@ func (q *Queries) ListTasksByContest(ctx context.Context, contestID uuid.UUID) (
 			&i.SortOrder,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DatasetUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -140,9 +145,10 @@ UPDATE tasks SET
   score_label = COALESCE($6, score_label),
   higher_is_better = COALESCE($7, higher_is_better),
   sort_order = COALESCE($8, sort_order),
+  dataset_url = COALESCE($9, dataset_url),
   updated_at = now()
 WHERE id = $1
-RETURNING id, contest_id, slug, title, description, problem_statement_url, submission_schema, score_label, higher_is_better, sort_order, created_at, updated_at
+RETURNING id, contest_id, slug, title, description, problem_statement_url, submission_schema, score_label, higher_is_better, sort_order, created_at, updated_at, dataset_url
 `
 
 type UpdateTaskParams struct {
@@ -154,6 +160,7 @@ type UpdateTaskParams struct {
 	ScoreLabel          *string   `json:"score_label"`
 	HigherIsBetter      *bool     `json:"higher_is_better"`
 	SortOrder           *int32    `json:"sort_order"`
+	DatasetUrl          *string   `json:"dataset_url"`
 }
 
 func (q *Queries) UpdateTask(ctx context.Context, arg UpdateTaskParams) (Task, error) {
@@ -166,6 +173,7 @@ func (q *Queries) UpdateTask(ctx context.Context, arg UpdateTaskParams) (Task, e
 		arg.ScoreLabel,
 		arg.HigherIsBetter,
 		arg.SortOrder,
+		arg.DatasetUrl,
 	)
 	var i Task
 	err := row.Scan(
@@ -181,6 +189,7 @@ func (q *Queries) UpdateTask(ctx context.Context, arg UpdateTaskParams) (Task, e
 		&i.SortOrder,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DatasetUrl,
 	)
 	return i, err
 }

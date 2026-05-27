@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"strings"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
@@ -14,6 +16,7 @@ import (
 	"github.com/mank1/olpai-backend/db"
 	"github.com/mank1/olpai-backend/internal/http/dto"
 	mw "github.com/mank1/olpai-backend/internal/http/middleware"
+	"github.com/mank1/olpai-backend/internal/storage"
 )
 
 type submissionSchemaTaskAssets struct {
@@ -25,6 +28,7 @@ type submissionSchemaTaskAssets struct {
 type TaskHandler struct {
 	q   db.Querier
 	val *validator.Validate
+	s3  *storage.S3
 }
 
 func (h *TaskHandler) populateTaskAssets(ctx context.Context, resp *dto.TaskResponse) {
@@ -44,8 +48,8 @@ func (h *TaskHandler) populateTaskAssets(ctx context.Context, resp *dto.TaskResp
 	}
 }
 
-func NewTaskHandler(q db.Querier) *TaskHandler {
-	return &TaskHandler{q: q, val: validator.New()}
+func NewTaskHandler(q db.Querier, s3 *storage.S3) *TaskHandler {
+	return &TaskHandler{q: q, val: validator.New(), s3: s3}
 }
 
 // POST /api/v1/contests/:id/tasks
@@ -75,6 +79,7 @@ func (h *TaskHandler) Create(c echo.Context) error {
 		ScoreLabel:          req.ScoreLabel,
 		HigherIsBetter:      req.HigherIsBetter,
 		SortOrder:           req.SortOrder,
+		DatasetUrl:          req.DatasetURL,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -166,6 +171,7 @@ func (h *TaskHandler) Update(c echo.Context) error {
 		ScoreLabel:          req.ScoreLabel,
 		HigherIsBetter:      req.HigherIsBetter,
 		SortOrder:           req.SortOrder,
+		DatasetUrl:          req.DatasetURL,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -188,4 +194,103 @@ func (h *TaskHandler) Delete(c echo.Context) error {
 		return mw.ErrInternal("delete task failed")
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// GET /api/v1/tasks/:id/statement
+func (h *TaskHandler) GetStatement(c echo.Context) error {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return mw.ErrBadRequest("invalid task id")
+	}
+
+	task, err := h.q.GetTaskByID(c.Request().Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return mw.ErrNotFound("task not found")
+		}
+		return mw.ErrInternal("fetch task failed")
+	}
+
+	if task.ProblemStatementUrl == nil || *task.ProblemStatementUrl == "" {
+		return mw.ErrNotFound("statement not found")
+	}
+
+	// If the statement URL is an external link, redirect to it
+	if strings.HasPrefix(*task.ProblemStatementUrl, "http://") || strings.HasPrefix(*task.ProblemStatementUrl, "https://") {
+		return c.Redirect(http.StatusFound, *task.ProblemStatementUrl)
+	}
+
+	// Otherwise, it's stored in S3 (e.g. key `tasks/:id/statement.pdf`)
+	if h.s3 == nil {
+		return mw.ErrInternal("storage unavailable")
+	}
+
+	objectKey := *task.ProblemStatementUrl
+	// Safeguard in case it's a relative API path stored in DB
+	if strings.HasPrefix(objectKey, "/api/v1") {
+		objectKey = "tasks/" + id.String() + "/statement.pdf"
+	}
+
+	reader, err := h.s3.Get(c.Request().Context(), objectKey)
+	if err != nil {
+		return mw.ErrNotFound("file not found in storage")
+	}
+	defer reader.Close()
+
+	c.Response().Header().Set(echo.HeaderContentType, "application/pdf")
+	c.Response().Header().Set(echo.HeaderContentDisposition, "inline; filename=\"statement.pdf\"")
+	c.Response().WriteHeader(http.StatusOK)
+	_, err = io.Copy(c.Response().Writer, reader)
+	return err
+}
+
+// POST /api/v1/tasks/:id/statement
+func (h *TaskHandler) UploadStatement(c echo.Context) error {
+	if h.s3 == nil {
+		return mw.ErrInternal("storage unavailable")
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return mw.ErrBadRequest("invalid task id")
+	}
+
+	task, err := h.q.GetTaskByID(c.Request().Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return mw.ErrNotFound("task not found")
+		}
+		return mw.ErrInternal("fetch task failed")
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		return mw.ErrBadRequest("missing file in form data")
+	}
+
+	src, err := file.Open()
+	if err != nil {
+		return mw.ErrInternal("failed to open uploaded file")
+	}
+	defer src.Close()
+
+	// Upload to MinIO/S3
+	objectKey := "tasks/" + task.ID.String() + "/statement.pdf"
+	err = h.s3.Upload(c.Request().Context(), objectKey, src, file.Size, "application/pdf")
+	if err != nil {
+		return mw.ErrInternal("failed to upload file to storage")
+	}
+
+	// Update task in database
+	statementURL := "/api/v1/tasks/" + task.ID.String() + "/statement"
+	_, err = h.q.UpdateTask(c.Request().Context(), db.UpdateTaskParams{
+		ID:                  task.ID,
+		ProblemStatementUrl: &statementURL,
+	})
+	if err != nil {
+		return mw.ErrInternal("failed to update task problem statement URL")
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"problem_statement_url": statementURL,
+	})
 }

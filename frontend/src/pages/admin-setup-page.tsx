@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
-import { api, type Contest, type Task, type User, type ContestEntry, type PhaseDef, type Phase, type EvaluationSet } from '../lib/api-client';
+import { api, API_BASE_URL, type Contest, type Task, type User, type ContestEntry, type PhaseDef, type Phase, type EvaluationSet } from '../lib/api-client';
 import {
   Settings, CheckCircle2, XCircle, Plus, Upload, ArrowLeft, Trash2, AlertTriangle,
-  LayoutGrid, FileText, Layers, Users, Volume2, LifeBuoy, ShieldCheck
+  LayoutGrid, FileText, Layers, Users, Volume2, LifeBuoy, ShieldCheck, UploadCloud
 } from 'lucide-react';
 
 const REQUIRED_TASK_ASSETS = ['judge.py'];
@@ -72,11 +72,14 @@ export const AdminSetupPage: React.FC = () => {
   const [taskScoreLabel, setTaskScoreLabel] = useState('Accuracy');
   const [taskHigherBetter, setTaskHigherBetter] = useState(true);
   const [taskSortOrder, setTaskSortOrder] = useState(1);
+  const [taskDatasetUrl, setTaskDatasetUrl] = useState('');
   const [taskError, setTaskError] = useState<string | null>(null);
 
   // Asset upload states
   const [uploadProgress, setUploadProgress] = useState<'idle' | 'initiating' | 'uploading' | 'completing' | 'done' | 'failed'>('idle');
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const [uploadingPdfTaskId, setUploadingPdfTaskId] = useState<string | null>(null);
 
   // Contest Edit Settings form state
   const [settingsTitle, setSettingsTitle] = useState('');
@@ -210,6 +213,7 @@ export const AdminSetupPage: React.FC = () => {
       setTaskScoreLabel('Accuracy');
       setTaskHigherBetter(true);
       setTaskSortOrder(tasks.length + 1);
+      setTaskDatasetUrl('');
       setTaskError(null);
       refetchTasks();
     },
@@ -378,7 +382,33 @@ export const AdminSetupPage: React.FC = () => {
       score_label: taskScoreLabel,
       higher_is_better: taskHigherBetter,
       sort_order: taskSortOrder,
+      dataset_url: taskDatasetUrl || null,
     });
+  };
+
+  const getPdfUrl = (url: string | null | undefined) => {
+    if (!url) return '';
+    if (url.startsWith('http')) return url;
+    const apiBase = API_BASE_URL.endsWith('/api/v1') ? API_BASE_URL.slice(0, -7) : API_BASE_URL;
+    return `${apiBase}${url}`;
+  };
+
+  const handlePdfUploadForTask = async (taskId: string, file: File) => {
+    if (file.type !== 'application/pdf') {
+      alert('Chỉ chấp nhận tệp định dạng PDF.');
+      return;
+    }
+    try {
+      setUploadingPdfTaskId(taskId);
+      await api.uploadTaskStatement(taskId, file);
+      refetchTasks();
+      alert('Tải lên đề bài PDF thành công!');
+    } catch (err) {
+      const error = err as { response?: { data?: { message?: string } } };
+      alert(error?.response?.data?.message || 'Không thể tải lên tệp đề bài.');
+    } finally {
+      setUploadingPdfTaskId(null);
+    }
   };
 
   const formatDateForInput = (dateStr?: string | null) => {
@@ -1027,6 +1057,18 @@ export const AdminSetupPage: React.FC = () => {
                 />
               </div>
 
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label" style={{ fontSize: '0.8rem', color: '#475569' }}>Link Dataset huấn luyện (Drive, Kaggle...)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  style={{ padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}
+                  value={taskDatasetUrl}
+                  onChange={(e) => setTaskDatasetUrl(e.target.value)}
+                  placeholder="https://drive.google.com/..."
+                />
+              </div>
+
               <div className="form-group flex items-center gap-2" style={{ marginBottom: '0.5rem' }}>
                 <input
                   type="checkbox"
@@ -1112,6 +1154,53 @@ export const AdminSetupPage: React.FC = () => {
                       >
                         <Trash2 size={13} /> Xóa bài tập
                       </button>
+                    </div>
+
+                    {/* PDF Statement upload block */}
+                    <div style={{ marginBottom: '1rem', border: '1px solid #e2e8f0', padding: '1rem', borderRadius: '8px', backgroundColor: '#f8fafc' }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#0f172a', marginBottom: '0.8rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>Đề bài (Problem Statement PDF)</span>
+                        {t.problem_statement_url ? (
+                          <span style={{ fontSize: '0.75rem', color: '#16a34a', fontWeight: 600 }}>Đã tải lên đề bài PDF</span>
+                        ) : (
+                          <span style={{ fontSize: '0.75rem', color: '#dc2626', fontWeight: 600 }}>Chưa có đề bài PDF</span>
+                        )}
+                      </div>
+                      
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                        <input
+                          type="file"
+                          id={`task-pdf-upload-${t.id}`}
+                          accept="application/pdf"
+                          style={{ display: 'none' }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              handlePdfUploadForTask(t.id, file);
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => document.getElementById(`task-pdf-upload-${t.id}`)?.click()}
+                          className="btn btn-secondary flex items-center gap-1.5"
+                          style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }}
+                          disabled={uploadingPdfTaskId === t.id}
+                        >
+                          <UploadCloud size={14} />
+                          {uploadingPdfTaskId === t.id ? 'Đang tải lên...' : t.problem_statement_url ? 'Cập nhật đề bài PDF' : 'Tải lên đề bài PDF'}
+                        </button>
+                        {t.problem_statement_url && (
+                          <a
+                            href={getPdfUrl(t.problem_statement_url)}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ fontSize: '0.8rem', textDecoration: 'underline', color: 'hsl(var(--primary))' }}
+                          >
+                            Xem PDF đề bài hiện tại
+                          </a>
+                        )}
+                      </div>
                     </div>
 
                     <div style={{ marginBottom: '1rem', border: '1px solid #e2e8f0', padding: '1rem', borderRadius: '8px', backgroundColor: '#f8fafc' }}>

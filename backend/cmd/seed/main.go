@@ -18,15 +18,38 @@ import (
 
 const passwordHash = "$2a$10$6y1QM9ZlnTcbwV3uM8CWzeshpECuI.ZJ3Plh2VIx5uOdkWnLihM1K" // "password"
 
+var vnFullNames = []string{
+	"Nguyễn Văn An", "Trần Thị Bình", "Lê Hoàng Cường", "Phạm Minh Đức", "Vũ Thị Hoa",
+	"Đặng Huy Hoàng", "Bùi Thị Hương", "Đỗ Minh Khang", "Ngô Thanh Lâm", "Hồ Hoàng Nam",
+	"Dương Hồng Ngọc", "Lý Thanh Phong", "Phan Văn Quân", "Võ Thị Quỳnh", "Trịnh Tiến Sơn",
+	"Mai Thu Thảo", "Đào Huy Tuấn", "Hoàng Kim Oanh", "Phùng Hải Đăng", "Tạ Minh Trí",
+	"Đỗ Hoàng Long", "Trần Quang Hải", "Phạm Đức Thắng", "Lê Tuấn Tú", "Nguyễn Minh Triết",
+	"Đặng Bảo Châu", "Vũ Khánh Linh", "Bùi Hoàng Anh", "Nguyễn Tuấn Kiệt", "Trần Gia Bảo",
+	"Nguyễn Hữu Phước", "Lê Minh Nhật", "Phạm Ngọc Duy", "Nguyễn Thùy Chi", "Vũ Quốc Trung",
+	"Trần Văn Hùng", "Nguyễn Thị Mai", "Lê Xuân Trường", "Phạm Thu Trang", "Nguyễn Tiến Đạt",
+}
+
+type SeedTask struct {
+	Title          string
+	Slug           string
+	Description    string
+	ScoreLabel     string
+	HigherIsBetter bool
+}
+
+type SeedContest struct {
+	Title       string
+	Slug        string
+	Description string
+	Status      db.ContestStatus
+	Tasks       []SeedTask
+}
+
 func main() {
 	var (
 		reset                = flag.Bool("reset", true, "truncate tables before seeding")
-		usersN               = flag.Int("users", 200, "number of contestant users")
-		contestsN            = flag.Int("contests", 8, "number of contests")
-		tasksPerContest      = flag.Int("tasks-per-contest", 10, "tasks per contest")
-		entriesPerContest    = flag.Int("entries-per-contest", 150, "entries per contest")
-		submissionsPerEntry  = flag.Int("submissions-per-entry", 8, "submissions per entry")
-		announcementsPerCont = flag.Int("announcements-per-contest", 12, "announcements per contest")
+		usersN               = flag.Int("users", 30, "number of contestant users")
+		submissionsPerEntry  = flag.Int("submissions-per-entry", 3, "submissions per entry")
 	)
 	flag.Parse()
 
@@ -39,7 +62,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
 	pool, err := pgxpool.New(ctx, dsn)
@@ -66,12 +89,13 @@ func main() {
 	q := db.New(tx)
 	now := time.Now().UTC()
 
+	// 1. Create Admins (Only Admin and Contestant are seeded now as per simplification request)
 	admin, err := q.CreateUser(ctx, db.CreateUserParams{
 		Email:        "admin@local.com",
 		PasswordHash: passwordHash,
-		FullName:     "Dev Admin",
-		Role:         "admin",
-		StudentID:    ptrString("AD-001"),
+		FullName:     "Trưởng Ban Tổ Chức",
+		Role:         db.UserRoleAdmin,
+		StudentID:    ptrString("ADMIN-01"),
 		AvatarUrl:    ptrString("https://api.dicebear.com/7.x/adventurer/svg?seed=admin"),
 	})
 	if err != nil {
@@ -79,29 +103,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	jury, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        "jury@local.com",
-		PasswordHash: passwordHash,
-		FullName:     "Dev Jury",
-		Role:         "jury",
-		StudentID:    ptrString("JR-002"),
-		AvatarUrl:    ptrString("https://api.dicebear.com/7.x/adventurer/svg?seed=jury"),
-	})
-	if err != nil {
-		_, _ = os.Stderr.WriteString("create jury: " + err.Error() + "\n")
-		os.Exit(1)
+	// 2. Create Contestants
+	limitUsers := *usersN
+	if limitUsers > len(vnFullNames) {
+		limitUsers = len(vnFullNames)
 	}
-
-	contestants := make([]db.User, 0, *usersN)
-	for i := 1; i <= *usersN; i++ {
-		email := fmt.Sprintf("user%04d@local.com", i)
-		fullName := fmt.Sprintf("User %04d", i)
+	contestants := make([]db.User, 0, limitUsers)
+	for i := 0; i < limitUsers; i++ {
+		fullName := vnFullNames[i]
+		email := fmt.Sprintf("sv%03d@bkdn.edu.vn", i+1)
 		u, err := q.CreateUser(ctx, db.CreateUserParams{
 			Email:        email,
 			PasswordHash: passwordHash,
 			FullName:     fullName,
-			Role:         "contestant",
-			StudentID:    ptrString(fmt.Sprintf("SV-%04d", i)),
+			Role:         db.UserRoleContestant,
+			StudentID:    ptrString(fmt.Sprintf("10222%03d", 100+i)),
 			AvatarUrl:    ptrString(fmt.Sprintf("https://api.dicebear.com/7.x/adventurer/svg?seed=%s", urlSafeSeed(fullName))),
 		})
 		if err != nil {
@@ -111,23 +127,110 @@ func main() {
 		contestants = append(contestants, u)
 	}
 
-	allTasks := make([]db.Task, 0, *contestsN**tasksPerContest)
-	allPhasesByContest := make(map[uuid.UUID]map[db.ContestPhaseKey]db.ContestPhaseDef)
+	// 3. Define Professional AI Contests
+	contestsData := []SeedContest{
+		{
+			Title:       "Olympic Tin Học Sinh Viên 2026 - AI Siêu Cúp",
+			Slug:        "olp-ai-sieu-cup-2026",
+			Description: "Bảng đấu trí tuệ nhân tạo chuyên sâu dành cho các sinh viên xuất sắc nhất toàn quốc tại Olympic Tin học Sinh viên Việt Nam 2026.",
+			Status:      db.ContestStatusRunning,
+			Tasks: []SeedTask{
+				{
+					Title:          "Phát hiện biển báo giao thông Việt Nam (Traffic Sign Detection)",
+					Slug:           "traffic-sign-detection",
+					Description:    "Xây dựng mô hình học sâu để phát hiện và phân loại chính xác 36 loại biển báo giao thông đường bộ Việt Nam từ ảnh thực tế đường phố.",
+					ScoreLabel:     "Mean Average Precision (mAP)",
+					HigherIsBetter: true,
+				},
+				{
+					Title:          "Dự đoán nồng độ bụi mịn PM2.5 (Air Quality PM2.5 Prediction)",
+					Slug:           "pm25-air-quality",
+					Description:    "Dự báo nồng độ bụi mịn PM2.5 tại Hà Nội trong 24 giờ tiếp theo dựa trên dữ liệu khí tượng và lịch sử ô nhiễm không khí.",
+					ScoreLabel:     "Root Mean Squared Error (RMSE)",
+					HigherIsBetter: false,
+				},
+			},
+		},
+		{
+			Title:       "AI Driving Agent Challenge 2026",
+			Slug:        "ai-driving-agent-2026",
+			Description: "Thử thách phát triển mô hình tự hành thông minh (End-to-End Deep Learning) điều khiển xe chạy an toàn trong sa bàn giả lập.",
+			Status:      db.ContestStatusRunning,
+			Tasks: []SeedTask{
+				{
+					Title:          "Dự đoán góc lái tối ưu (Steering Angle Estimation)",
+					Slug:           "steering-angle",
+					Description:    "Dự đoán góc đánh lái trực tiếp từ ảnh camera hành trình gắn phía trước đầu xe tự hành.",
+					ScoreLabel:     "Mean Absolute Error (MAE)",
+					HigherIsBetter: false,
+				},
+				{
+					Title:          "Tránh chướng ngại vật chủ động (Obstacle Avoidance)",
+					Slug:           "obstacle-avoidance",
+					Description:    "Phát hiện khoảng cách an toàn và tự động phanh/tránh các vật cản tĩnh và động trên làn đường.",
+					ScoreLabel:     "Success Rate (%)",
+					HigherIsBetter: true,
+				},
+			},
+		},
+		{
+			Title:       "Adversarial Attack & Defense Championship",
+			Slug:        "adversarial-championship-2026",
+			Description: "Giải đấu an ninh học sâu: Thiết kế các cuộc tấn công gây nhiễu ảnh và các giải pháp phòng thủ mô hình AI hiệu quả.",
+			Status:      db.ContestStatusRegistrationOpen,
+			Tasks: []SeedTask{
+				{
+					Title:          "Tấn công mô hình phân loại (Adversarial Image Attack)",
+					Slug:           "image-attack",
+					Description:    "Tạo nhiễu adversarial siêu nhỏ để làm sai lệch kết quả phân loại ảnh của mô hình ResNet50 mục tiêu mà mắt thường không phát hiện được.",
+					ScoreLabel:     "Attack Success Rate (ASR)",
+					HigherIsBetter: true,
+				},
+				{
+					Title:          "Phòng thủ mô hình chống nhiễu (Robust Model Defense)",
+					Slug:           "model-defense",
+					Description:    "Huấn luyện mô hình phân loại có khả năng chống chịu cao trước các đòn tấn công nhiễu FGSM, PGD và CW.",
+					ScoreLabel:     "Robust Accuracy (%)",
+					HigherIsBetter: true,
+				},
+			},
+		},
+		{
+			Title:       "Vietnamese Sentiment Analysis Cup 2026",
+			Slug:        "vietnamese-sentiment-2026",
+			Description: "Cuộc thi xử lý ngôn ngữ tự nhiên (NLP) phân loại bình luận khách hàng trên các nền tảng thương mại điện tử lớn của Việt Nam.",
+			Status:      db.ContestStatusEnded,
+			Tasks: []SeedTask{
+				{
+					Title:          "Phân loại sắc thái bình luận (Sentiment Classification)",
+					Slug:           "sentiment-class",
+					Description:    "Phân loại văn bản đánh giá sản phẩm thành 3 lớp: Tích cực (Positive), Tiêu cực (Negative), và Trung lập (Neutral).",
+					ScoreLabel:     "Accuracy Score",
+					HigherIsBetter: true,
+				},
+			},
+		},
+	}
+
+	allTasks := make([]db.Task, 0)
 	allTaskPhases := make(map[uuid.UUID]map[db.ContestPhaseKey]db.Phase)
 
-	for ci := 1; ci <= *contestsN; ci++ {
-		slug := fmt.Sprintf("demo-contest-%02d", ci)
-		title := fmt.Sprintf("Demo Contest %02d", ci)
-		desc := "Demo contest seeded for development."
-
-		start := now.Add(time.Duration(-24*ci) * time.Hour)
+	// 4. Seed Contests & Tasks
+	for _, cData := range contestsData {
+		start := now.Add(-7 * 24 * time.Hour)
 		end := start.Add(14 * 24 * time.Hour)
+		if cData.Status == db.ContestStatusEnded {
+			start = now.Add(-21 * 24 * time.Hour)
+			end = now.Add(-7 * 24 * time.Hour)
+		} else if cData.Status == db.ContestStatusRegistrationOpen {
+			start = now.Add(2 * 24 * time.Hour)
+			end = now.Add(16 * 24 * time.Hour)
+		}
 
-		descPtr := ptrString(desc)
 		c, err := q.CreateContest(ctx, db.CreateContestParams{
-			Slug:              slug,
-			Title:             title,
-			Description:       descPtr,
+			Slug:              cData.Slug,
+			Title:             cData.Title,
+			Description:       ptrString(cData.Description),
 			BannerUrl:         nil,
 			EntryPolicy:       db.ContestEntryPolicyBoth,
 			RegistrationStart: pgtype.Timestamptz{Time: start.Add(-48 * time.Hour), Valid: true},
@@ -146,38 +249,28 @@ func main() {
 			os.Exit(1)
 		}
 
-		status := db.ContestStatusRunning
-		switch ci % 4 {
-		case 1:
-			status = db.ContestStatusRunning
-		case 2:
-			status = db.ContestStatusRegistrationOpen
-		case 3:
-			status = db.ContestStatusEnded
-		case 0:
-			status = db.ContestStatusRunning
-		}
-		_, err = q.UpdateContestStatus(ctx, db.UpdateContestStatusParams{ID: c.ID, Status: status})
+		_, err = q.UpdateContestStatus(ctx, db.UpdateContestStatusParams{ID: c.ID, Status: cData.Status})
 		if err != nil {
 			_, _ = os.Stderr.WriteString("update contest status: " + err.Error() + "\n")
 			os.Exit(1)
 		}
 
+		// Create phase definitions for this contest
 		defs := make(map[db.ContestPhaseKey]db.ContestPhaseDef, 4)
 		for _, def := range []struct {
 			Key       db.ContestPhaseKey
 			Title     string
 			SortOrder int32
 		}{
-			{db.ContestPhaseKeyPublicTest, "Public Test", 1},
-			{db.ContestPhaseKeyPrivateTest, "Private Test", 2},
-			{db.ContestPhaseKeyFinalPublic, "Final Public", 3},
-			{db.ContestPhaseKeyFinalPrivate, "Final Private", 4},
+			{db.ContestPhaseKeyPublicTest, "Chạy thử (Public)", 1},
+			{db.ContestPhaseKeyPrivateTest, "Chạy thật (Private)", 2},
+			{db.ContestPhaseKeyFinalPublic, "Chung kết thử (Final Public)", 3},
+			{db.ContestPhaseKeyFinalPrivate, "Chung kết thật (Final Private)", 4},
 		} {
 			pd, err := q.CreatePhaseDef(ctx, db.CreatePhaseDefParams{
 				ContestID: c.ID,
 				Key:       def.Key,
-				Title:     fmt.Sprintf("%s — %s", title, def.Title),
+				Title:     def.Title,
 				SortOrder: def.SortOrder,
 			})
 			if err != nil {
@@ -186,24 +279,20 @@ func main() {
 			}
 			defs[def.Key] = pd
 		}
-		allPhasesByContest[c.ID] = defs
 
-		for ti := 1; ti <= *tasksPerContest; ti++ {
-			tslug := fmt.Sprintf("task-%02d", ti)
-			title := fmt.Sprintf("Task %02d", ti)
-			tdesc := fmt.Sprintf("Seeded task %02d for %s", ti, c.Title)
-			tdescPtr := ptrString(tdesc)
-
+		// Seed Tasks for this contest
+		for ti, tData := range cData.Tasks {
 			task, err := q.CreateTask(ctx, db.CreateTaskParams{
 				ContestID:           c.ID,
-				Slug:                tslug,
-				Title:               title,
-				Description:         tdescPtr,
+				Slug:                tData.Slug,
+				Title:               tData.Title,
+				Description:         ptrString(tData.Description),
 				ProblemStatementUrl: nil,
 				Column6:             "{}",
-				ScoreLabel:          "Score",
-				HigherIsBetter:      true,
-				SortOrder:           int32(ti),
+				ScoreLabel:          tData.ScoreLabel,
+				HigherIsBetter:      tData.HigherIsBetter,
+				SortOrder:           int32(ti + 1),
+				DatasetUrl:          ptrString("https://drive.google.com/drive/folders/sample-dataset-url-for-" + tData.Slug),
 			})
 			if err != nil {
 				_, _ = os.Stderr.WriteString("create task: " + err.Error() + "\n")
@@ -211,10 +300,11 @@ func main() {
 			}
 			allTasks = append(allTasks, task)
 
+			// Create evaluation sets
 			pubSet, err := q.CreateEvaluationSet(ctx, db.CreateEvaluationSetParams{
 				TaskID:      task.ID,
 				Key:         db.EvaluationSetKeyPublic,
-				Title:       "Public Evaluation Set",
+				Title:       "Public Test Set",
 				Description: nil,
 			})
 			if err != nil {
@@ -224,7 +314,7 @@ func main() {
 			privSet, err := q.CreateEvaluationSet(ctx, db.CreateEvaluationSetParams{
 				TaskID:      task.ID,
 				Key:         db.EvaluationSetKeyPrivate,
-				Title:       "Private Evaluation Set",
+				Title:       "Private Test Set",
 				Description: nil,
 			})
 			if err != nil {
@@ -232,6 +322,7 @@ func main() {
 				os.Exit(1)
 			}
 
+			// Add assets to evaluation sets
 			for _, set := range []db.TaskEvaluationSet{pubSet, privSet} {
 				_, err := q.UpsertEvaluationSetAsset(ctx, db.UpsertEvaluationSetAssetParams{
 					EvaluationSetID:  set.ID,
@@ -261,10 +352,10 @@ func main() {
 				}
 			}
 
+			// Create Phases
 			phases := make(map[db.ContestPhaseKey]db.Phase, 4)
 			for _, defKey := range []db.ContestPhaseKey{db.ContestPhaseKeyPublicTest, db.ContestPhaseKeyPrivateTest, db.ContestPhaseKeyFinalPublic, db.ContestPhaseKeyFinalPrivate} {
 				pd := defs[defKey]
-
 				evalSetID := pubSet.ID
 				isFinal := false
 				if defKey == db.ContestPhaseKeyPrivateTest || defKey == db.ContestPhaseKeyFinalPrivate {
@@ -303,49 +394,49 @@ func main() {
 			allTaskPhases[task.ID] = phases
 		}
 
-		// announcements
-		for ai := 1; ai <= *announcementsPerCont; ai++ {
-			pinned := ai%7 == 0
-			_, err := q.CreateAnnouncement(ctx, db.CreateAnnouncementParams{
-				ContestID: pgtype.UUID{Bytes: c.ID, Valid: true},
-				TaskID:    pgtype.UUID{Valid: false},
-				Title:     fmt.Sprintf("Announcement %02d", ai),
-				Content:   fmt.Sprintf("Update %02d for %s", ai, c.Title),
-				IsPinned:  pinned,
-				IsPublic:  true,
-				CreatedBy: admin.ID,
-			})
-			if err != nil {
-				_, _ = os.Stderr.WriteString("create announcement: " + err.Error() + "\n")
-				os.Exit(1)
-			}
-		}
-	}
-
-	// Entries + submissions
-	for contestID, defs := range allPhasesByContest {
-		_ = defs
-		// Shuffle contestants for this contest to select without replacement
-		shuffled := make([]db.User, len(contestants))
-		copy(shuffled, contestants)
-		rand.Shuffle(len(shuffled), func(i, j int) {
-			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+		// Seed Contest Announcements
+		_, err = q.CreateAnnouncement(ctx, db.CreateAnnouncementParams{
+			ContestID: pgtype.UUID{Bytes: c.ID, Valid: true},
+			TaskID:    pgtype.UUID{Valid: false},
+			Title:     "Chào mừng các đội thi đến với giải đấu!",
+			Content:   fmt.Sprintf("Cổng đăng ký cho %s hiện đã chính thức hoạt động. Chúc các bạn làm bài thi tốt và đạt kết quả cao!", c.Title),
+			IsPinned:  true,
+			IsPublic:  true,
+			CreatedBy: admin.ID,
 		})
+		if err != nil {
+			_, _ = os.Stderr.WriteString("create announcement: " + err.Error() + "\n")
+			os.Exit(1)
+		}
 
-		for ei := 0; ei < *entriesPerContest; ei++ {
-			if ei >= len(shuffled) {
-				break
+		_, err = q.CreateAnnouncement(ctx, db.CreateAnnouncementParams{
+			ContestID: pgtype.UUID{Bytes: c.ID, Valid: true},
+			TaskID:    pgtype.UUID{Valid: false},
+			Title:     "Yêu cầu về mã nguồn nộp bài thi",
+			Content:   "Mã nguồn file infer.py của các bạn phải đảm bảo không chứa các kết nối mạng bên ngoài và thời gian chạy tối đa là 10 giây cho mỗi lượt kiểm thử.",
+			IsPinned:  false,
+			IsPublic:  true,
+			CreatedBy: admin.ID,
+		})
+		if err != nil {
+			_, _ = os.Stderr.WriteString("create announcement: " + err.Error() + "\n")
+			os.Exit(1)
+		}
+
+		// Register contestants into this contest
+		for _, u := range contestants {
+			// Seed contestants conditionally (some register, some do not)
+			if rand.IntN(4) == 0 {
+				continue
 			}
-			u := shuffled[ei]
-			displayName := u.FullName
 
 			entry, err := q.CreateContestEntry(ctx, db.CreateContestEntryParams{
-				ContestID:    contestID,
+				ContestID:    c.ID,
 				EntryType:    db.EntryTypeIndividual,
 				EntryMode:    db.EntryModeOfficial,
 				UserID:       pgtype.UUID{Bytes: u.ID, Valid: true},
 				TeamID:       pgtype.UUID{Valid: false},
-				DisplayName:  displayName,
+				DisplayName:  u.FullName,
 				Status:       db.EntryStatusApproved,
 				RegisteredBy: u.ID,
 				StartAt:      pgtype.Timestamptz{Time: now, Valid: true},
@@ -366,71 +457,160 @@ func main() {
 				os.Exit(1)
 			}
 
-			// pick tasks for this contest
-			contestTasks := make([]db.Task, 0)
+			// Get tasks of this contest
+			cTasks := make([]db.Task, 0)
 			for _, t := range allTasks {
-				if t.ContestID == contestID {
-					contestTasks = append(contestTasks, t)
+				if t.ContestID == c.ID {
+					cTasks = append(cTasks, t)
 				}
 			}
-			if len(contestTasks) == 0 {
-				continue
-			}
 
-			for si := 0; si < *submissionsPerEntry; si++ {
-				t := contestTasks[rand.IntN(len(contestTasks))]
-				phases := allTaskPhases[t.ID]
-				ph := phases[db.ContestPhaseKeyPublicTest]
-				if si%6 == 0 {
-					ph = phases[db.ContestPhaseKeyPrivateTest]
-				}
+			// Generate submissions for these contestants
+			if cData.Status != db.ContestStatusRegistrationOpen {
+				for si := 0; si < *submissionsPerEntry; si++ {
+					t := cTasks[rand.IntN(len(cTasks))]
+					phases := allTaskPhases[t.ID]
+					ph := phases[db.ContestPhaseKeyPublicTest]
+					if si == *submissionsPerEntry-1 {
+						ph = phases[db.ContestPhaseKeyPrivateTest]
+					}
 
-				sub, err := q.CreateSubmission(ctx, db.CreateSubmissionParams{
-					ContestID:      contestID,
-					ContestEntryID: entry.ID,
-					TaskID:         t.ID,
-					PhaseID:        ph.ID,
-					SubmittedBy:    u.ID,
-					FileCount:      1,
-					TotalSizeBytes: 1000,
-					ManifestHash:   nil,
-					ClientIp:       nil,
-					UserAgent:      nil,
-				})
-				if err != nil {
-					_, _ = os.Stderr.WriteString("create submission: " + err.Error() + "\n")
-					os.Exit(1)
-				}
+					sub, err := q.CreateSubmission(ctx, db.CreateSubmissionParams{
+						ContestID:      c.ID,
+						ContestEntryID: entry.ID,
+						TaskID:         t.ID,
+						PhaseID:        ph.ID,
+						SubmittedBy:    u.ID,
+						FileCount:      1,
+						TotalSizeBytes: 1540,
+						ManifestHash:   nil,
+						ClientIp:       nil,
+						UserAgent:      nil,
+					})
+					if err != nil {
+						_, _ = os.Stderr.WriteString("create submission: " + err.Error() + "\n")
+						os.Exit(1)
+					}
 
-				_, err = q.CreateSubmissionFile(ctx, db.CreateSubmissionFileParams{
-					SubmissionID:     sub.ID,
-					OriginalFilename: "predictions.csv",
-					StoragePath:      fmt.Sprintf("seed/submissions/%s.csv", sub.ID.String()),
-					FileSize:         1000,
-					ContentType:      ptrString("text/csv"),
-					HashSha256:       ptrString("seed"),
-				})
-				if err != nil {
-					_, _ = os.Stderr.WriteString("create submission file: " + err.Error() + "\n")
-					os.Exit(1)
-				}
+					_, err = q.CreateSubmissionFile(ctx, db.CreateSubmissionFileParams{
+						SubmissionID:     sub.ID,
+						OriginalFilename: "predictions.csv",
+						StoragePath:      fmt.Sprintf("seed/submissions/%s.csv", sub.ID.String()),
+						FileSize:         1540,
+						ContentType:      ptrString("text/csv"),
+						HashSha256:       ptrString("seed-hash"),
+					})
+					if err != nil {
+						_, _ = os.Stderr.WriteString("create submission file: " + err.Error() + "\n")
+						os.Exit(1)
+					}
 
-				// Mark done/failed and set scores
-				status := "done"
-				if rand.IntN(10) == 0 {
-					status = "failed"
-				}
-				score := float64(rand.IntN(5000)) / 100.0
-				_, err = tx.Exec(ctx, "UPDATE submissions SET status=$2, raw_score=$3, display_score=$3, evaluated_at=now(), updated_at=now() WHERE id=$1", sub.ID, status, score)
-				if err != nil {
-					_, _ = os.Stderr.WriteString("update submission status: " + err.Error() + "\n")
-					os.Exit(1)
+					// Update status to done and generate realistic scores
+					score := 0.0
+					if t.HigherIsBetter {
+						// e.g. Accuracy or mAP [0.0, 1.0] or [0.0, 100.0]
+						if strings.Contains(t.ScoreLabel, "%") || strings.Contains(t.ScoreLabel, "Rate") {
+							score = 40.0 + rand.Float64()*55.0 // 40% - 95%
+						} else {
+							score = 0.5 + rand.Float64()*0.48 // 0.5 - 0.98
+						}
+					} else {
+						// e.g. RMSE or MAE (lower is better, e.g. 0.01 - 5.0)
+						score = 0.05 + rand.Float64()*2.5
+					}
+
+					status := "done"
+					if rand.IntN(20) == 0 {
+						status = "failed"
+						score = 0.0
+					}
+
+					_, err = tx.Exec(ctx, "UPDATE submissions SET status=$2, raw_score=$3, display_score=$3, evaluated_at=now(), updated_at=now() WHERE id=$1", sub.ID, status, score)
+					if err != nil {
+						_, _ = os.Stderr.WriteString("update submission score: " + err.Error() + "\n")
+						os.Exit(1)
+					}
 				}
 			}
 		}
 	}
 
-	_ = jury // keep for potential future use
+	// 5. Seed System-wide Announcements (Global)
+	_, err = q.CreateAnnouncement(ctx, db.CreateAnnouncementParams{
+		ContestID: pgtype.UUID{Valid: false},
+		TaskID:    pgtype.UUID{Valid: false},
+		Title:     "Bảo trì nâng cấp hạ tầng máy chấm GPU OLP AI 2026",
+		Content:   "Hệ thống máy chấm OLP AI sẽ tạm dừng nhận bài thi vào lúc 23:00 tối nay để nâng cấp hệ thống CUDA driver và bổ sung thêm 2 card đồ họa NVIDIA RTX 4090 nhằm phục vụ tốt hơn cho vòng thi sắp tới. Dự kiến thời gian bảo trì kéo dài 2 tiếng.",
+		IsPinned:  true,
+		IsPublic:  true,
+		CreatedBy: admin.ID,
+	})
+	if err != nil {
+		_, _ = os.Stderr.WriteString("create system announcement: " + err.Error() + "\n")
+		os.Exit(1)
+	}
+
+	_, err = q.CreateAnnouncement(ctx, db.CreateAnnouncementParams{
+		ContestID: pgtype.UUID{Valid: false},
+		TaskID:    pgtype.UUID{Valid: false},
+		Title:     "Cập nhật quy định về chống gian lận thi cử",
+		Content:   "Ban tổ chức quy định nghiêm cấm các hành vi hardcode nhãn dữ liệu kiểm thử, kết nối internet trong file code nộp bài hoặc sao chép lời giải. Mọi bài làm vi phạm sẽ bị hệ thống tự động gắn cờ cảnh báo và hủy tư cách dự thi ngay lập tức.",
+		IsPinned:  false,
+		IsPublic:  true,
+		CreatedBy: admin.ID,
+	})
+	if err != nil {
+		_, _ = os.Stderr.WriteString("create system announcement 2: " + err.Error() + "\n")
+		os.Exit(1)
+	}
+
+	// 6. Recompute Standings/Leaderboards for all seeded phases
+	_, _ = os.Stdout.WriteString("recomputing leaderboards for all phases...\n")
+	rows, err := tx.Query(ctx, "SELECT p.id, p.leaderboard_mode, t.higher_is_better, p.contest_phase_def_id, t.contest_id FROM phases p JOIN tasks t ON t.id = p.task_id")
+	if err != nil {
+		_, _ = os.Stderr.WriteString("query phases: " + err.Error() + "\n")
+		os.Exit(1)
+	}
+	defer rows.Close()
+
+	type phaseInfo struct {
+		ID                uuid.UUID
+		LeaderboardMode   string
+		HigherIsBetter    bool
+		ContestPhaseDefID uuid.UUID
+		ContestID         uuid.UUID
+	}
+	var phases []phaseInfo
+	for rows.Next() {
+		var pi phaseInfo
+		err := rows.Scan(&pi.ID, &pi.LeaderboardMode, &pi.HigherIsBetter, &pi.ContestPhaseDefID, &pi.ContestID)
+		if err != nil {
+			_, _ = os.Stderr.WriteString("scan phase: " + err.Error() + "\n")
+			os.Exit(1)
+		}
+		phases = append(phases, pi)
+	}
+
+	for _, pi := range phases {
+		err = q.RecomputeTaskPhaseLeaderboard(ctx, db.RecomputeTaskPhaseLeaderboardParams{
+			PhaseID:         pi.ID,
+			LeaderboardMode: db.LeaderboardMode(pi.LeaderboardMode),
+			HigherIsBetter:  pi.HigherIsBetter,
+		})
+		if err != nil {
+			_, _ = os.Stderr.WriteString("recompute task phase: " + err.Error() + "\n")
+			os.Exit(1)
+		}
+
+		err = q.RecomputeContestPhaseLeaderboard(ctx, db.RecomputeContestPhaseLeaderboardParams{
+			ContestPhaseDefID: pi.ContestPhaseDefID,
+			ContestID:         pi.ContestID,
+		})
+		if err != nil {
+			_, _ = os.Stderr.WriteString("recompute contest phase: " + err.Error() + "\n")
+			os.Exit(1)
+		}
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		_, _ = os.Stderr.WriteString("commit: " + err.Error() + "\n")

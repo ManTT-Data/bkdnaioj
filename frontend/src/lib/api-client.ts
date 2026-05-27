@@ -68,6 +68,7 @@ export interface Task {
   score_label: string;
   higher_is_better: boolean;
   sort_order: number;
+  dataset_url?: string | null;
 }
 
 export interface SubmissionSchema {
@@ -372,6 +373,16 @@ export const api = {
   async deleteTask(id: string) {
     const res = await apiClient.delete(`/tasks/${id}`);
     return res.data;
+  },
+  async uploadTaskStatement(taskId: string, file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await apiClient.post(`/tasks/${taskId}/statement`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return res.data as { problem_statement_url: string };
   },
 
   // Evaluation Sets (Jury assets config)
