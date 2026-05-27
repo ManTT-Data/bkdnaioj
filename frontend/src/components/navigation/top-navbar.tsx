@@ -1,10 +1,10 @@
 import React from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/auth-context';
-import { Code2, LogOut, User as UserIcon, Settings, Search } from 'lucide-react';
+import { Code2, LogOut, User as UserIcon, Search } from 'lucide-react';
 
 export const TopNavbar: React.FC = () => {
-  const { user, logout, isAdmin, isJury } = useAuth();
+  const { user, logout, isAdmin } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
 
@@ -17,7 +17,7 @@ export const TopNavbar: React.FC = () => {
   const isActive = (path: string) => {
     return pathname.startsWith(path);
   };
-  
+
   const getLinkStyle = (path: string) => {
     const active = isActive(path);
     return {
@@ -34,15 +34,21 @@ export const TopNavbar: React.FC = () => {
         <div className="flex items-center gap-8">
           <Link to="/" className="navbar-brand" style={{ gap: '0.4rem', color: '#0f172a', fontWeight: 800, fontSize: '1.35rem' }}>
             <Code2 size={24} style={{ color: '#2563eb' }} />
-            Uni<span>OJ</span>
+            BKDNAIOJ<span></span>
           </Link>
-          
+
           <nav className="navbar-links" style={{ gap: '1.75rem', display: 'flex', alignItems: 'center' }}>
             <Link to="/newsfeed" className="navbar-item" style={getLinkStyle('/newsfeed')}>Newsfeed</Link>
             <Link to="/problems" className="navbar-item" style={getLinkStyle('/problems')}>Problems</Link>
             <Link to="/contests" className="navbar-item" style={getLinkStyle('/contests')}>Contests</Link>
             <Link to="/rankings" className="navbar-item" style={getLinkStyle('/rankings')}>Rankings</Link>
             <Link to="/teams" className="navbar-item" style={getLinkStyle('/teams')}>Groups</Link>
+            {isAdmin && (
+              <Link to="/admin/users" className="navbar-item" style={getLinkStyle('/admin/users')}>Users & Roles</Link>
+            )}
+            {isAdmin && (
+              <Link to="/admin/contests/new" className="navbar-item" style={getLinkStyle('/admin/contests/new')}>Create Contest</Link>
+            )}
           </nav>
         </div>
 
@@ -73,12 +79,7 @@ export const TopNavbar: React.FC = () => {
           <div className="flex items-center gap-4">
             {user ? (
               <>
-                {(isAdmin || isJury) && (
-                  <Link to="/admin" className="btn btn-secondary flex items-center gap-2" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
-                    <Settings size={14} />
-                    Admin Panel
-                  </Link>
-                )}
+
                 <div className="flex items-center gap-2">
                   <div className="badge badge-info" style={{ textTransform: 'uppercase', fontSize: '0.7rem' }}>
                     {user.role}

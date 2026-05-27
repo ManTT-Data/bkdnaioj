@@ -416,28 +416,7 @@ export const ContestDetailPage: React.FC = () => {
         {/* Right Column: Registration & Info */}
         <div className="flex flex-col gap-4">
           {/* Registration / Admin Card */}
-          {(isAdmin || isJury) ? (
-            <div className="panel" style={{ border: '1px solid hsl(var(--warning))', backgroundColor: 'hsla(var(--warning), 0.02)' }}>
-              <h3 style={{ fontSize: '1.1rem', marginBottom: '1.1rem', color: 'hsl(var(--warning-dark))', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Settings size={18} /> Administrative Access
-              </h3>
-              <div style={{ fontSize: '0.85rem', lineHeight: '1.5', color: 'var(--text)' }} className="flex flex-col gap-3">
-                <p>
-                  You are logged in as <strong>{user?.role}</strong>. You have unrestricted access to all phases and tasks.
-                </p>
-                <div style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem', borderRadius: 'var(--radius)', backgroundColor: 'var(--background)', border: '1px solid hsl(var(--border))' }}>
-                  <strong>Role:</strong> {user?.role.toUpperCase()} <br />
-                  <strong>User:</strong> {user?.full_name}
-                </div>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
-                  Contest registration is not required for organizers.
-                </p>
-                <Link to={`/admin/contests/${contest.id}/setup`} className="btn btn-secondary flex items-center justify-center gap-2" style={{ width: '100%', marginTop: '0.5rem' }}>
-                  <Settings size={16} /> Admin Setup Panel
-                </Link>
-              </div>
-            </div>
-          ) : (
+          {!(isAdmin || isJury) && (
             <div className="panel">
               <h3 style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>Your Participation</h3>
 

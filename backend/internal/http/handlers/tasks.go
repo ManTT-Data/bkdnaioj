@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
@@ -16,6 +17,7 @@ import (
 	"github.com/mank1/olpai-backend/db"
 	"github.com/mank1/olpai-backend/internal/http/dto"
 	mw "github.com/mank1/olpai-backend/internal/http/middleware"
+	"github.com/mank1/olpai-backend/internal/security"
 	"github.com/mank1/olpai-backend/internal/storage"
 )
 
@@ -26,9 +28,10 @@ type submissionSchemaTaskAssets struct {
 }
 
 type TaskHandler struct {
-	q   db.Querier
-	val *validator.Validate
-	s3  *storage.S3
+	q      db.Querier
+	val    *validator.Validate
+	jwtMgr *security.JWTManager
+	s3     *storage.S3
 }
 
 func (h *TaskHandler) populateTaskAssets(ctx context.Context, resp *dto.TaskResponse) {
@@ -48,8 +51,52 @@ func (h *TaskHandler) populateTaskAssets(ctx context.Context, resp *dto.TaskResp
 	}
 }
 
-func NewTaskHandler(q db.Querier, s3 *storage.S3) *TaskHandler {
-	return &TaskHandler{q: q, val: validator.New(), s3: s3}
+func NewTaskHandler(q db.Querier, jwtMgr *security.JWTManager, s3 *storage.S3) *TaskHandler {
+	return &TaskHandler{q: q, val: validator.New(), jwtMgr: jwtMgr, s3: s3}
+}
+
+func (h *TaskHandler) getUserRole(c echo.Context) string {
+	if h.jwtMgr == nil {
+		return ""
+	}
+	header := c.Request().Header.Get("Authorization")
+	if header == "" {
+		return ""
+	}
+	parts := strings.SplitN(header, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+		return ""
+	}
+	claims, err := h.jwtMgr.Verify(parts[1])
+	if err != nil {
+		return ""
+	}
+	return claims.Role
+}
+
+func (h *TaskHandler) checkContestAccess(c echo.Context, contestID uuid.UUID) error {
+	role := h.getUserRole(c)
+	if role == "admin" || role == "jury" {
+		return nil
+	}
+
+	contest, err := h.q.GetContestByID(c.Request().Context(), contestID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return mw.ErrNotFound("contest not found")
+		}
+		return mw.ErrInternal("fetch contest failed")
+	}
+
+	if contest.Status == db.ContestStatusDraft {
+		return mw.ErrForbidden("contest not open yet")
+	}
+
+	if contest.StartTime.Time.After(time.Now()) {
+		return mw.ErrForbidden("contest has not started yet")
+	}
+
+	return nil
 }
 
 // POST /api/v1/contests/:id/tasks
@@ -114,6 +161,9 @@ func (h *TaskHandler) ListByContest(c echo.Context) error {
 	if err != nil {
 		return mw.ErrBadRequest("invalid contest id")
 	}
+	if err := h.checkContestAccess(c, contestID); err != nil {
+		return err
+	}
 	tasks, err := h.q.ListTasksByContest(c.Request().Context(), contestID)
 	if err != nil {
 		return mw.ErrInternal("list tasks failed")
@@ -138,6 +188,9 @@ func (h *TaskHandler) Get(c echo.Context) error {
 			return mw.ErrNotFound("task not found")
 		}
 		return mw.ErrInternal("fetch task failed")
+	}
+	if err := h.checkContestAccess(c, task.ContestID); err != nil {
+		return err
 	}
 	resp := dto.TaskToResponse(task)
 	h.populateTaskAssets(c.Request().Context(), &resp)
@@ -209,6 +262,10 @@ func (h *TaskHandler) GetStatement(c echo.Context) error {
 			return mw.ErrNotFound("task not found")
 		}
 		return mw.ErrInternal("fetch task failed")
+	}
+
+	if err := h.checkContestAccess(c, task.ContestID); err != nil {
+		return err
 	}
 
 	if task.ProblemStatementUrl == nil || *task.ProblemStatementUrl == "" {

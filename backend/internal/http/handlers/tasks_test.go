@@ -4,10 +4,12 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/mank1/olpai-backend/db"
 	"github.com/stretchr/testify/assert"
 )
@@ -29,7 +31,7 @@ func TestTaskHandler_Create_Success(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewTaskHandler(mock, nil)
+	h := NewTaskHandler(mock, nil, nil)
 	body := `{"slug":"task-a","title":"Task A","score_label":"RMSE","higher_is_better":false,"sort_order":1}`
 	c, rec := newTestContext("POST", "/api/v1/contests/"+contestID.String()+"/tasks", body)
 	c.SetParamNames("id")
@@ -48,7 +50,7 @@ func TestTaskHandler_Create_DuplicateSlug(t *testing.T) {
 			return db.Task{}, &pgconn.PgError{Code: "23505"}
 		},
 	}
-	h := NewTaskHandler(mock, nil)
+	h := NewTaskHandler(mock, nil, nil)
 	body := `{"slug":"task-a","title":"Task A","score_label":"RMSE","higher_is_better":false,"sort_order":1}`
 	c, _ := newTestContext("POST", "/api/v1/contests/"+contestID.String()+"/tasks", body)
 	c.SetParamNames("id")
@@ -69,7 +71,7 @@ func TestTaskHandler_ListByContest_Success(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewTaskHandler(mock, nil)
+	h := NewTaskHandler(mock, nil, nil)
 	c, rec := newTestContext("GET", "/api/v1/contests/"+contestID.String()+"/tasks", "")
 	c.SetParamNames("id")
 	c.SetParamValues(contestID.String())
@@ -87,7 +89,7 @@ func TestTaskHandler_Get_Success(t *testing.T) {
 			return db.Task{ID: taskID, ContestID: uuid.New(), Slug: "task-a", Title: "Task A", ScoreLabel: "RMSE"}, nil
 		},
 	}
-	h := NewTaskHandler(mock, nil)
+	h := NewTaskHandler(mock, nil, nil)
 	c, rec := newTestContext("GET", "/api/v1/tasks/"+taskID.String(), "")
 	c.SetParamNames("id")
 	c.SetParamValues(taskID.String())
@@ -105,7 +107,7 @@ func TestTaskHandler_Get_NotFound(t *testing.T) {
 			return db.Task{}, pgx.ErrNoRows
 		},
 	}
-	h := NewTaskHandler(mock, nil)
+	h := NewTaskHandler(mock, nil, nil)
 	c, _ := newTestContext("GET", "/api/v1/tasks/"+taskID.String(), "")
 	c.SetParamNames("id")
 	c.SetParamValues(taskID.String())
@@ -123,7 +125,7 @@ func TestTaskHandler_Delete_Success(t *testing.T) {
 			return nil
 		},
 	}
-	h := NewTaskHandler(mock, nil)
+	h := NewTaskHandler(mock, nil, nil)
 	c, rec := newTestContext("DELETE", "/api/v1/tasks/"+taskID.String(), "")
 	c.SetParamNames("id")
 	c.SetParamValues(taskID.String())
@@ -131,4 +133,77 @@ func TestTaskHandler_Delete_Success(t *testing.T) {
 	err := h.Delete(c)
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusNoContent, rec.Code)
+}
+
+func TestTaskHandler_ListByContest_ForbiddenUnstartedContest(t *testing.T) {
+	contestID := uuid.New()
+	futureTime := time.Now().Add(24 * time.Hour)
+
+	mock := &db.MockQuerier{
+		GetContestByIDFunc: func(ctx context.Context, id uuid.UUID) (db.Contest, error) {
+			return db.Contest{
+				ID:        contestID,
+				Status:    db.ContestStatusRegistrationOpen,
+				StartTime: pgtype.Timestamptz{Time: futureTime, Valid: true},
+			}, nil
+		},
+	}
+	h := NewTaskHandler(mock, nil, nil)
+	c, _ := newTestContext("GET", "/api/v1/contests/"+contestID.String()+"/tasks", "")
+	c.SetParamNames("id")
+	c.SetParamValues(contestID.String())
+
+	err := h.ListByContest(c)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "contest has not started yet")
+}
+
+func TestTaskHandler_ListByContest_DraftContest(t *testing.T) {
+	contestID := uuid.New()
+	pastTime := time.Now().Add(-24 * time.Hour)
+
+	mock := &db.MockQuerier{
+		GetContestByIDFunc: func(ctx context.Context, id uuid.UUID) (db.Contest, error) {
+			return db.Contest{
+				ID:        contestID,
+				Status:    db.ContestStatusDraft,
+				StartTime: pgtype.Timestamptz{Time: pastTime, Valid: true},
+			}, nil
+		},
+	}
+	h := NewTaskHandler(mock, nil, nil)
+	c, _ := newTestContext("GET", "/api/v1/contests/"+contestID.String()+"/tasks", "")
+	c.SetParamNames("id")
+	c.SetParamValues(contestID.String())
+
+	err := h.ListByContest(c)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "contest not open yet")
+}
+
+func TestTaskHandler_Get_ForbiddenUnstartedContest(t *testing.T) {
+	taskID := uuid.New()
+	contestID := uuid.New()
+	futureTime := time.Now().Add(24 * time.Hour)
+
+	mock := &db.MockQuerier{
+		GetTaskByIDFunc: func(ctx context.Context, id uuid.UUID) (db.Task, error) {
+			return db.Task{ID: taskID, ContestID: contestID, Slug: "task-a", Title: "Task A", ScoreLabel: "RMSE"}, nil
+		},
+		GetContestByIDFunc: func(ctx context.Context, id uuid.UUID) (db.Contest, error) {
+			return db.Contest{
+				ID:        contestID,
+				Status:    db.ContestStatusRegistrationOpen,
+				StartTime: pgtype.Timestamptz{Time: futureTime, Valid: true},
+			}, nil
+		},
+	}
+	h := NewTaskHandler(mock, nil, nil)
+	c, _ := newTestContext("GET", "/api/v1/tasks/"+taskID.String(), "")
+	c.SetParamNames("id")
+	c.SetParamValues(taskID.String())
+
+	err := h.Get(c)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "contest has not started yet")
 }

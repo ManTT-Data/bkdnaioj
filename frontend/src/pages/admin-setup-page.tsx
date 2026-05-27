@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
-import { api, API_BASE_URL, type Contest, type Task, type User, type ContestEntry, type PhaseDef, type Phase, type EvaluationSet } from '../lib/api-client';
+import { api, API_BASE_URL, type Contest, type Task, type ContestEntry, type PhaseDef, type Phase, type EvaluationSet } from '../lib/api-client';
 import {
   Settings, CheckCircle2, XCircle, Plus, Upload, ArrowLeft, Trash2, AlertTriangle,
-  LayoutGrid, FileText, Layers, Users, Volume2, LifeBuoy, ShieldCheck, UploadCloud
+  LayoutGrid, FileText, Layers, Users, Volume2, LifeBuoy, UploadCloud,
+  ChevronDown, ChevronUp, Edit, ExternalLink
 } from 'lucide-react';
 
 const REQUIRED_TASK_ASSETS = ['judge.py'];
@@ -52,7 +53,7 @@ export const AdminSetupPage: React.FC = () => {
   const navigate = useNavigate();
 
   // Active Admin Sub-tab
-  const [subTab, setSubTab] = useState<'checklist' | 'tasks' | 'entries' | 'settings' | 'users' | 'announcements' | 'tickets' | 'phases'>('checklist');
+  const [subTab, setSubTab] = useState<'checklist' | 'tasks' | 'entries' | 'settings' | 'announcements' | 'tickets' | 'phases'>('checklist');
 
   // Announcements form state
   const [annTitle, setAnnTitle] = useState('');
@@ -74,6 +75,8 @@ export const AdminSetupPage: React.FC = () => {
   const [taskSortOrder, setTaskSortOrder] = useState(1);
   const [taskDatasetUrl, setTaskDatasetUrl] = useState('');
   const [taskError, setTaskError] = useState<string | null>(null);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [expandedTasks, setExpandedTasks] = useState<{ [taskId: string]: boolean }>({});
 
   // Asset upload states
   const [uploadProgress, setUploadProgress] = useState<'idle' | 'initiating' | 'uploading' | 'completing' | 'done' | 'failed'>('idle');
@@ -143,11 +146,6 @@ export const AdminSetupPage: React.FC = () => {
     enabled: !!contestId,
   });
 
-  const { data: users = [], refetch: refetchUsers } = useQuery<User[]>({
-    queryKey: ['adminUsers'],
-    queryFn: api.listUsers,
-    enabled: subTab === 'users',
-  });
 
   const { data: announcements = [], refetch: refetchAnnouncements } = useQuery<any[]>({
     queryKey: ['adminAnnouncements', contestId],
@@ -222,6 +220,25 @@ export const AdminSetupPage: React.FC = () => {
     }
   });
 
+  const updateTaskMutation = useMutation({
+    mutationFn: ({ taskId, payload }: { taskId: string, payload: any }) => api.updateTask(taskId, payload),
+    onSuccess: () => {
+      setEditingTask(null);
+      setTaskTitle('');
+      setTaskSlug('');
+      setTaskDesc('');
+      setTaskScoreLabel('Accuracy');
+      setTaskHigherBetter(true);
+      setTaskSortOrder(tasks.length + 1);
+      setTaskDatasetUrl('');
+      setTaskError(null);
+      refetchTasks();
+    },
+    onError: (err: any) => {
+      setTaskError(err?.response?.data?.message || 'Failed to update task.');
+    }
+  });
+
   const createEvaluationSetMutation = useMutation({
     mutationFn: ({ taskId, payload }: { taskId: string, payload: any }) => api.createEvaluationSet(taskId, payload),
     onSuccess: () => {
@@ -247,12 +264,6 @@ export const AdminSetupPage: React.FC = () => {
     }
   });
 
-  const updateUserRoleMutation = useMutation({
-    mutationFn: ({ id, role }: { id: string, role: string }) => api.updateUserRole(id, role),
-    onSuccess: () => {
-      refetchUsers();
-    }
-  });
 
   const { data: contestEntries = [], refetch: refetchContestEntries } = useQuery<ContestEntry[]>({
     queryKey: ['adminEntries', contestId],
@@ -367,23 +378,63 @@ export const AdminSetupPage: React.FC = () => {
   });
 
 
-  const handleCreateTask = (e: React.FormEvent) => {
+  const handleSaveTask = (e: React.FormEvent) => {
     e.preventDefault();
     setTaskError(null);
-    if (!taskTitle || !taskSlug) {
-      setTaskError('Title and Slug are required.');
+    if (!taskTitle) {
+      setTaskError('Tên bài tập là bắt buộc.');
       return;
     }
-    createTaskMutation.mutate({
+    const payload = {
       title: taskTitle,
-      slug: taskSlug,
       description: taskDesc,
-      submission_schema: buildSubmissionSchema(),
       score_label: taskScoreLabel,
       higher_is_better: taskHigherBetter,
-      sort_order: taskSortOrder,
+      sort_order: Number(taskSortOrder) || 1,
       dataset_url: taskDatasetUrl || null,
-    });
+    };
+    if (editingTask) {
+      updateTaskMutation.mutate({
+        taskId: editingTask.id,
+        payload,
+      });
+    } else {
+      if (!taskSlug) {
+        setTaskError('Slug định danh là bắt buộc.');
+        return;
+      }
+      createTaskMutation.mutate({
+        ...payload,
+        slug: taskSlug,
+        submission_schema: buildSubmissionSchema(),
+      });
+    }
+  };
+
+  const handleEditClick = (t: Task) => {
+    setEditingTask(t);
+    setTaskTitle(t.title);
+    setTaskSlug(t.slug);
+    setTaskDesc(t.description || '');
+    setTaskScoreLabel(t.score_label || 'Accuracy');
+    setTaskHigherBetter(t.higher_is_better);
+    setTaskSortOrder(t.sort_order || 1);
+    setTaskDatasetUrl(t.dataset_url || '');
+    setTaskError(null);
+    // Smooth scroll to the top of the form
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingTask(null);
+    setTaskTitle('');
+    setTaskSlug('');
+    setTaskDesc('');
+    setTaskScoreLabel('Accuracy');
+    setTaskHigherBetter(true);
+    setTaskSortOrder(tasks.length + 1);
+    setTaskDatasetUrl('');
+    setTaskError(null);
   };
 
   const getPdfUrl = (url: string | null | undefined) => {
@@ -695,7 +746,6 @@ export const AdminSetupPage: React.FC = () => {
               { id: 'announcements', label: 'Thông báo', icon: Volume2 },
               { id: 'tickets', label: 'Hỗ trợ (Tickets)', icon: LifeBuoy },
               { id: 'settings', label: 'Cài đặt cuộc thi', icon: Settings },
-              { id: 'users', label: 'Người dùng & Vai trò', icon: ShieldCheck },
             ].map((item) => {
               const Icon = item.icon;
               const isActive = subTab === item.id;
@@ -779,7 +829,6 @@ export const AdminSetupPage: React.FC = () => {
               {subTab === 'tickets' && 'Trung tâm hỗ trợ (Tickets)'}
               {subTab === 'phases' && 'Cấu hình giai đoạn (Phases)'}
               {subTab === 'settings' && 'Cài đặt chi tiết cuộc thi'}
-              {subTab === 'users' && 'Quản lý vai trò người dùng'}
 
               {/* Status Badge */}
               <span
@@ -807,7 +856,6 @@ export const AdminSetupPage: React.FC = () => {
               {subTab === 'tickets' && 'Tiếp nhận, xử lý và phân công giải quyết các yêu cầu hỗ trợ từ thí sinh.'}
               {subTab === 'phases' && 'Thiết lập các mốc thời gian diễn ra các phase chính thức/thử nghiệm.'}
               {subTab === 'settings' && 'Chỉnh sửa thông tin chung, cài đặt normalization hoặc xóa cuộc thi.'}
-              {subTab === 'users' && 'Phân quyền vai trò hệ thống (Admin, Jury, Contestant) cho các tài khoản.'}
             </p>
           </div>
 
@@ -1001,13 +1049,15 @@ export const AdminSetupPage: React.FC = () => {
       {/* Manage Tasks Tab */}
       {subTab === 'tasks' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 2.5fr', gap: '1.5rem', alignItems: 'start' }}>
-          {/* Create Task Form */}
+          {/* Create / Edit Task Form */}
           <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '1.5rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#0f172a', marginBottom: '1.25rem', marginTop: 0 }}>Thêm bài tập mới</h3>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#0f172a', marginBottom: '1.25rem', marginTop: 0 }}>
+              {editingTask ? `Chỉnh sửa: ${editingTask.title}` : 'Thêm bài tập mới'}
+            </h3>
             {taskError && (
               <div className="alert alert-danger" style={{ fontSize: '0.8rem', padding: '0.75rem', borderRadius: '6px' }}>{taskError}</div>
             )}
-            <form onSubmit={handleCreateTask} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <form onSubmit={handleSaveTask} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label" style={{ fontSize: '0.8rem', color: '#475569' }}>Tên bài tập *</label>
                 <input
@@ -1017,23 +1067,32 @@ export const AdminSetupPage: React.FC = () => {
                   value={taskTitle}
                   onChange={(e) => {
                     setTaskTitle(e.target.value);
-                    setTaskSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''));
+                    if (!editingTask) {
+                      setTaskSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''));
+                    }
                   }}
                   required
                 />
               </div>
 
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: '0.8rem', color: '#475569' }}>Slug định danh *</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  style={{ padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}
-                  value={taskSlug}
-                  onChange={(e) => setTaskSlug(e.target.value)}
-                  required
-                />
-              </div>
+              {editingTask ? (
+                <div style={{ fontSize: '0.8rem', color: '#64748b', backgroundColor: '#f8fafc', padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                  <strong>Slug định danh:</strong> <code style={{ color: '#0f172a' }}>{taskSlug}</code>
+                  <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '0.2rem' }}>Không thể thay đổi slug định danh của bài tập đã tạo.</div>
+                </div>
+              ) : (
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontSize: '0.8rem', color: '#475569' }}>Slug định danh *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    style={{ padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}
+                    value={taskSlug}
+                    onChange={(e) => setTaskSlug(e.target.value)}
+                    required
+                  />
+                </div>
+              )}
 
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label" style={{ fontSize: '0.8rem', color: '#475569' }}>Mô tả ngắn</label>
@@ -1054,6 +1113,17 @@ export const AdminSetupPage: React.FC = () => {
                   value={taskScoreLabel}
                   onChange={(e) => setTaskScoreLabel(e.target.value)}
                   placeholder="e.g. Accuracy / F1"
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label" style={{ fontSize: '0.8rem', color: '#475569' }}>Thứ tự sắp xếp (Sort Order)</label>
+                <input
+                  type="number"
+                  className="form-input"
+                  style={{ padding: '0.5rem 0.75rem', fontSize: '0.85rem' }}
+                  value={taskSortOrder}
+                  onChange={(e) => setTaskSortOrder(Number(e.target.value))}
                 />
               </div>
 
@@ -1112,14 +1182,26 @@ export const AdminSetupPage: React.FC = () => {
                 </div>
               </div>
 
-              <button
-                type="submit"
-                className="btn btn-primary"
-                style={{ width: '100%', padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.85rem' }}
-                disabled={createTaskMutation.isPending}
-              >
-                {createTaskMutation.isPending ? 'Đang lưu...' : 'Thêm bài tập'}
-              </button>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{ flex: 1, padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.85rem' }}
+                  disabled={createTaskMutation.isPending || updateTaskMutation.isPending}
+                >
+                  {createTaskMutation.isPending || updateTaskMutation.isPending ? 'Đang lưu...' : (editingTask ? 'Cập nhật bài tập' : 'Thêm bài tập')}
+                </button>
+                {editingTask && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEdit}
+                    className="btn btn-secondary"
+                    style={{ padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.85rem', backgroundColor: '#ef4444', color: '#ffffff', border: '1px solid #ef4444' }}
+                  >
+                    Hủy
+                  </button>
+                )}
+              </div>
             </form>
           </div>
 
@@ -1132,208 +1214,267 @@ export const AdminSetupPage: React.FC = () => {
             ) : (
               tasks.map(t => {
                 const sets = taskEvalSets[t.id] || [];
+                const isExpanded = !!expandedTasks[t.id];
 
                 return (
-                  <div key={t.id} style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '1.5rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                  <div key={t.id} style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '1.25rem', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
                     {/* Header */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: '0.75rem', marginBottom: '1.25rem' }}>
-                      <div>
-                        <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#0f172a' }}>{t.title}</h4>
-                        <span style={{ fontFamily: 'var(--font-mono)', color: '#64748b', fontSize: '0.75rem' }}>slug ID: {t.slug}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (window.confirm(`Are you sure you want to delete the task "${t.title}"? This will delete all evaluation sets and contestant submissions associated with this task.`)) {
-                            deleteTaskMutation.mutate(t.id);
-                          }
-                        }}
-                        className="btn btn-danger"
-                        style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: '6px' }}
-                        disabled={deleteTaskMutation.isPending}
-                      >
-                        <Trash2 size={13} /> Xóa bài tập
-                      </button>
-                    </div>
-
-                    {/* PDF Statement upload block */}
-                    <div style={{ marginBottom: '1rem', border: '1px solid #e2e8f0', padding: '1rem', borderRadius: '8px', backgroundColor: '#f8fafc' }}>
-                      <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#0f172a', marginBottom: '0.8rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span>Đề bài (Problem Statement PDF)</span>
-                        {t.problem_statement_url ? (
-                          <span style={{ fontSize: '0.75rem', color: '#16a34a', fontWeight: 600 }}>Đã tải lên đề bài PDF</span>
-                        ) : (
-                          <span style={{ fontSize: '0.75rem', color: '#dc2626', fontWeight: 600 }}>Chưa có đề bài PDF</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #f1f5f9', paddingBottom: '0.75rem', marginBottom: isExpanded ? '1rem' : 0 }}>
+                      <div style={{ flex: 1, marginRight: '1rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                          <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#0f172a' }}>{t.title}</h4>
+                          <span style={{ fontSize: '0.7rem', backgroundColor: '#f1f5f9', color: '#475569', padding: '0.15rem 0.4rem', borderRadius: '4px', fontFamily: 'var(--font-mono)' }}>
+                            slug: {t.slug}
+                          </span>
+                          <span style={{ fontSize: '0.7rem', backgroundColor: '#e0f2fe', color: '#0369a1', padding: '0.15rem 0.4rem', borderRadius: '4px', fontWeight: 600 }}>
+                            Metric: {t.score_label}
+                          </span>
+                          <span style={{ fontSize: '0.7rem', backgroundColor: t.higher_is_better ? '#dcfce7' : '#fee2e2', color: t.higher_is_better ? '#15803d' : '#b91c1c', padding: '0.15rem 0.4rem', borderRadius: '4px', fontWeight: 600 }}>
+                            {t.higher_is_better ? 'Càng cao càng tốt' : 'Càng thấp càng tốt'}
+                          </span>
+                          <span style={{ fontSize: '0.7rem', backgroundColor: '#f3e8ff', color: '#6b21a8', padding: '0.15rem 0.4rem', borderRadius: '4px', fontWeight: 600 }}>
+                            Thứ tự: {t.sort_order}
+                          </span>
+                        </div>
+                        {t.description && (
+                          <p style={{ margin: '0.35rem 0 0 0', fontSize: '0.8rem', color: '#64748b', lineHeight: 1.4 }}>{t.description}</p>
+                        )}
+                        {t.dataset_url && (
+                          <div style={{ marginTop: '0.5rem' }}>
+                            <a
+                              href={t.dataset_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.78rem', color: '#2563eb', textDecoration: 'underline', fontWeight: 600 }}
+                            >
+                              <ExternalLink size={12} /> Dataset huấn luyện
+                            </a>
+                          </div>
                         )}
                       </div>
-                      
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                        <input
-                          type="file"
-                          id={`task-pdf-upload-${t.id}`}
-                          accept="application/pdf"
-                          style={{ display: 'none' }}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              handlePdfUploadForTask(t.id, file);
-                            }
-                          }}
-                        />
+                      <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
                         <button
                           type="button"
-                          onClick={() => document.getElementById(`task-pdf-upload-${t.id}`)?.click()}
-                          className="btn btn-secondary flex items-center gap-1.5"
-                          style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }}
-                          disabled={uploadingPdfTaskId === t.id}
+                          onClick={() => handleEditClick(t)}
+                          className="btn btn-secondary flex items-center gap-1"
+                          style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: '6px' }}
                         >
-                          <UploadCloud size={14} />
-                          {uploadingPdfTaskId === t.id ? 'Đang tải lên...' : t.problem_statement_url ? 'Cập nhật đề bài PDF' : 'Tải lên đề bài PDF'}
+                          <Edit size={13} /> Sửa
                         </button>
-                        {t.problem_statement_url && (
-                          <a
-                            href={getPdfUrl(t.problem_statement_url)}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={{ fontSize: '0.8rem', textDecoration: 'underline', color: 'hsl(var(--primary))' }}
-                          >
-                            Xem PDF đề bài hiện tại
-                          </a>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExpandedTasks(prev => ({
+                              ...prev,
+                              [t.id]: !prev[t.id]
+                            }));
+                          }}
+                          className="btn btn-secondary flex items-center gap-1"
+                          style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: '6px', backgroundColor: isExpanded ? '#cbd5e1' : '#f1f5f9' }}
+                        >
+                          Quản lý File & Test Sets {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm(`Are you sure you want to delete the task "${t.title}"? This will delete all evaluation sets and contestant submissions associated with this task.`)) {
+                              deleteTaskMutation.mutate(t.id);
+                            }
+                          }}
+                          className="btn btn-danger"
+                          style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', borderRadius: '6px' }}
+                          disabled={deleteTaskMutation.isPending}
+                        >
+                          <Trash2 size={13} /> Xóa
+                        </button>
                       </div>
                     </div>
 
-                    <div style={{ marginBottom: '1rem', border: '1px solid #e2e8f0', padding: '1rem', borderRadius: '8px', backgroundColor: '#f8fafc' }}>
-                      <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#0f172a', marginBottom: '0.8rem' }}>
-                        Shared task judge
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-                        {requiredTaskAssets(t).map((assetKey) => {
-                          const present = (t.asset_keys || []).includes(assetKey);
-                          const inputId = `task-asset-upload-${t.id}-${assetKey.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
-                          return (
-                            <div key={assetKey} style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', padding: '1rem', borderRadius: '8px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%', gap: '1rem' }}>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                                  <span>{assetKey}</span>
-                                  {present ? (
-                                    <span style={{ color: '#22c55e', fontSize: '0.75rem', fontWeight: 600 }}>✓ Present</span>
-                                  ) : (
-                                    <span style={{ color: '#ef4444', fontSize: '0.75rem', fontWeight: 600 }}>✗ Missing</span>
-                                  )}
-                                </div>
-                                <span style={{ fontSize: '0.75rem', color: '#64748b', lineHeight: 1.3, display: 'block' }}>Shared judge used by public/private and normal/final phases.</span>
-                              </div>
-                              <input
-                                type="file"
-                                id={inputId}
-                                style={{ display: 'none' }}
-                                onChange={(e) => handleTaskAssetUpload(e, t.id, assetKey)}
-                              />
-                              <button
-                                onClick={() => document.getElementById(inputId)?.click()}
-                                className="btn btn-secondary flex items-center gap-1"
-                                style={{ width: '100%', padding: '0.4rem', fontSize: '0.75rem', justifyContent: 'center' }}
-                                disabled={uploadProgress !== 'idle'}
+                    {/* Collapsible resources section */}
+                    {isExpanded && (
+                      <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '1rem', backgroundColor: '#f8fafc' }}>
+                        {/* PDF Statement upload block */}
+                        <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '1rem' }}>
+                          <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#0f172a', marginBottom: '0.6rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span>Đề bài (Problem Statement PDF)</span>
+                            {t.problem_statement_url ? (
+                              <span style={{ fontSize: '0.75rem', color: '#16a34a', fontWeight: 600 }}>Đã tải lên đề bài PDF</span>
+                            ) : (
+                              <span style={{ fontSize: '0.75rem', color: '#dc2626', fontWeight: 600 }}>Chưa có đề bài PDF</span>
+                            )}
+                          </div>
+                          
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                            <input
+                              type="file"
+                              id={`task-pdf-upload-${t.id}`}
+                              accept="application/pdf"
+                              style={{ display: 'none' }}
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  handlePdfUploadForTask(t.id, file);
+                                }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => document.getElementById(`task-pdf-upload-${t.id}`)?.click()}
+                              className="btn btn-secondary flex items-center gap-1.5"
+                              style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }}
+                              disabled={uploadingPdfTaskId === t.id}
+                            >
+                              <UploadCloud size={14} />
+                              {uploadingPdfTaskId === t.id ? 'Đang tải lên...' : t.problem_statement_url ? 'Cập nhật đề bài PDF' : 'Tải lên đề bài PDF'}
+                            </button>
+                            {t.problem_statement_url && (
+                              <a
+                                href={getPdfUrl(t.problem_statement_url)}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ fontSize: '0.8rem', textDecoration: 'underline', color: 'hsl(var(--primary))' }}
                               >
-                                <Upload size={12} /> Upload Judge
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div>
-                      {sets.length === 0 ? (
-                        <div style={{ padding: '1rem', backgroundColor: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '8px', textAlign: 'center' }}>
-                          <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0 0 0.75rem 0' }}>Chưa khởi tạo bộ dữ liệu đánh giá cho bài tập này.</p>
-                          <button
-                            onClick={() => initializeEvaluationSets(t)}
-                            className="btn btn-secondary flex items-center gap-1"
-                            style={{ padding: '0.35rem 0.7rem', fontSize: '0.75rem', margin: '0 auto' }}
-                            disabled={createEvaluationSetMutation.isPending}
-                          >
-                            <Plus size={12} /> Khởi tạo public/private eval sets
-                          </button>
+                                Xem PDF đề bài hiện tại
+                              </a>
+                            )}
+                          </div>
                         </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                          {(!sets.some(s => s.key === 'public') || !sets.some(s => s.key === 'private')) && (
-                            <div style={{ padding: '0.85rem', border: '1px solid #fde68a', backgroundColor: '#fffbeb', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
-                              <span style={{ fontSize: '0.8rem', color: '#92400e' }}>Task này chưa có đủ public/private evaluation sets.</span>
+
+                        {/* Shared task judge upload block */}
+                        <div style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: '1rem' }}>
+                          <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#0f172a', marginBottom: '0.6rem' }}>
+                            Shared task judge
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                            {requiredTaskAssets(t).map((assetKey) => {
+                              const present = (t.asset_keys || []).includes(assetKey);
+                              const inputId = `task-asset-upload-${t.id}-${assetKey.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+                              return (
+                                <div key={assetKey} style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', padding: '0.85rem', borderRadius: '8px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%', gap: '0.75rem' }}>
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                                      <span>{assetKey}</span>
+                                      {present ? (
+                                        <span style={{ color: '#22c55e', fontSize: '0.72rem', fontWeight: 600 }}>✓ Present</span>
+                                      ) : (
+                                        <span style={{ color: '#ef4444', fontSize: '0.72rem', fontWeight: 600 }}>✗ Missing</span>
+                                      )}
+                                    </div>
+                                    <span style={{ fontSize: '0.72rem', color: '#64748b', lineHeight: 1.3, display: 'block' }}>Shared judge used by public/private and normal/final phases.</span>
+                                  </div>
+                                  <input
+                                    type="file"
+                                    id={inputId}
+                                    style={{ display: 'none' }}
+                                    onChange={(e) => handleTaskAssetUpload(e, t.id, assetKey)}
+                                  />
+                                  <button
+                                    onClick={() => document.getElementById(inputId)?.click()}
+                                    className="btn btn-secondary flex items-center gap-1"
+                                    style={{ width: '100%', padding: '0.35rem', fontSize: '0.72rem', justifyContent: 'center' }}
+                                    disabled={uploadProgress !== 'idle'}
+                                  >
+                                    <Upload size={11} /> Upload Judge
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Evaluation Sets upload block */}
+                        <div>
+                          {sets.length === 0 ? (
+                            <div style={{ padding: '1rem', backgroundColor: '#ffffff', border: '1px dashed #cbd5e1', borderRadius: '8px', textAlign: 'center' }}>
+                              <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0 0 0.75rem 0' }}>Chưa khởi tạo bộ dữ liệu đánh giá cho bài tập này.</p>
                               <button
                                 onClick={() => initializeEvaluationSets(t)}
-                                className="btn btn-secondary"
-                                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}
+                                className="btn btn-secondary flex items-center gap-1"
+                                style={{ padding: '0.35rem 0.7rem', fontSize: '0.75rem', margin: '0 auto' }}
+                                disabled={createEvaluationSetMutation.isPending}
                               >
-                                Bổ sung eval sets
+                                <Plus size={12} /> Khởi tạo public/private eval sets
                               </button>
                             </div>
-                          )}
-                          {sets.map((s) => (
-                            <div key={s.id} style={{ border: '1px solid #f1f5f9', padding: '1rem', borderRadius: '8px', backgroundColor: '#f8fafc' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '0.5rem' }}>
-                                <span style={{ fontWeight: 600, fontSize: '0.8rem', color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
-                                  Bộ dữ liệu chấm: {s.title}
-                                </span>
-                                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', color: '#64748b' }}>
-                                  ID: {s.id}
-                                </span>
-                              </div>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                              {(!sets.some(s => s.key === 'public') || !sets.some(s => s.key === 'private')) && (
+                                <div style={{ padding: '0.85rem', border: '1px solid #fde68a', backgroundColor: '#fffbeb', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
+                                  <span style={{ fontSize: '0.8rem', color: '#92400e' }}>Task này chưa có đủ public/private evaluation sets.</span>
+                                  <button
+                                    onClick={() => initializeEvaluationSets(t)}
+                                    className="btn btn-secondary"
+                                    style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}
+                                  >
+                                    Bổ sung eval sets
+                                  </button>
+                                </div>
+                              )}
+                              {sets.map((s) => (
+                                <div key={s.id} style={{ border: '1px solid #e2e8f0', padding: '0.85rem', borderRadius: '8px', backgroundColor: '#ffffff' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '0.5rem' }}>
+                                    <span style={{ fontWeight: 700, fontSize: '0.78rem', color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+                                      Bộ dữ liệu chấm: {s.title}
+                                    </span>
+                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: '#94a3b8' }}>
+                                      ID: {s.id}
+                                    </span>
+                                  </div>
 
-                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-                                {requiredAssetsForSet(s).map((assetKey) => {
-                                  const present = (s.asset_keys || []).includes(assetKey);
-                                  const inputId = `asset-upload-${s.id}-${assetKey.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
-                                  return (
-                                    <div key={assetKey} style={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', padding: '1rem', borderRadius: '8px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%', gap: '1rem' }}>
-                                      <div style={{ flex: 1 }}>
-                                        <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-                                          <span>{assetKey}</span>
-                                          {present ? (
-                                            <span style={{ color: '#22c55e', fontSize: '0.75rem', fontWeight: 600 }}>✓ Present</span>
-                                          ) : (
-                                            <span style={{ color: '#ef4444', fontSize: '0.75rem', fontWeight: 600 }}>✗ Missing</span>
-                                          )}
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                                    {requiredAssetsForSet(s).map((assetKey) => {
+                                      const present = (s.asset_keys || []).includes(assetKey);
+                                      const inputId = `asset-upload-${s.id}-${assetKey.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+                                      return (
+                                        <div key={assetKey} style={{ backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', padding: '0.85rem', borderRadius: '8px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%', gap: '0.75rem' }}>
+                                          <div style={{ flex: 1 }}>
+                                            <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                                              <span>{assetKey}</span>
+                                              {present ? (
+                                                <span style={{ color: '#22c55e', fontSize: '0.72rem', fontWeight: 600 }}>✓ Present</span>
+                                              ) : (
+                                                <span style={{ color: '#ef4444', fontSize: '0.72rem', fontWeight: 600 }}>✗ Missing</span>
+                                              )}
+                                            </div>
+                                            <span style={{ fontSize: '0.72rem', color: '#64748b', lineHeight: 1.3, display: 'block' }}>Required evaluation asset from this task contract.</span>
+                                          </div>
+                                          <input
+                                            type="file"
+                                            id={inputId}
+                                            style={{ display: 'none' }}
+                                            onChange={(e) => handleAssetUpload(e, s.id, assetKey)}
+                                          />
+                                          <button
+                                            onClick={() => document.getElementById(inputId)?.click()}
+                                            className="btn btn-secondary flex items-center gap-1"
+                                            style={{ width: '100%', padding: '0.35rem', fontSize: '0.72rem', justifyContent: 'center' }}
+                                            disabled={uploadProgress !== 'idle'}
+                                          >
+                                            <Upload size={11} /> Upload Asset
+                                          </button>
                                         </div>
-                                        <span style={{ fontSize: '0.75rem', color: '#64748b', lineHeight: 1.3, display: 'block' }}>Required evaluation asset from this task contract.</span>
-                                      </div>
-                                      <input
-                                        type="file"
-                                        id={inputId}
-                                        style={{ display: 'none' }}
-                                        onChange={(e) => handleAssetUpload(e, s.id, assetKey)}
-                                      />
-                                      <button
-                                        onClick={() => document.getElementById(inputId)?.click()}
-                                        className="btn btn-secondary flex items-center gap-1"
-                                        style={{ width: '100%', padding: '0.4rem', fontSize: '0.75rem', justifyContent: 'center' }}
-                                        disabled={uploadProgress !== 'idle'}
-                                      >
-                                        <Upload size={12} /> Upload Asset
-                                      </button>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          ))}
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ))}
 
-                          {uploadError && (
-                            <div className="alert alert-danger" style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', marginBottom: 0 }}>
-                              {uploadError}
-                            </div>
-                          )}
+                              {uploadError && (
+                                <div className="alert alert-danger" style={{ padding: '0.5rem 0.75rem', fontSize: '0.8rem', marginBottom: 0 }}>
+                                  {uploadError}
+                                </div>
+                              )}
 
-                          {uploadProgress !== 'idle' && (
-                            <div style={{ fontSize: '0.75rem', color: '#64748b', textAlign: 'center', marginTop: '0.25rem' }}>
-                              Trạng thái upload: <strong style={{ color: '#0f172a' }}>{uploadProgress}</strong>
+                              {uploadProgress !== 'idle' && (
+                                <div style={{ fontSize: '0.75rem', color: '#64748b', textAlign: 'center', marginTop: '0.25rem' }}>
+                                  Trạng thái upload: <strong style={{ color: '#0f172a' }}>{uploadProgress}</strong>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -1609,83 +1750,6 @@ export const AdminSetupPage: React.FC = () => {
         </div>
       )}
 
-      {subTab === 'users' && (
-        <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
-          <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #e2e8f0' }}>
-            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#0f172a' }}>Tài khoản & Phân quyền hệ thống</h3>
-          </div>
-          <div style={{ overflowX: 'auto' }}>
-            <table className="oj-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid #f1f5f9' }}>
-                  <th style={{ padding: '0.85rem 1.5rem', fontSize: '0.75rem', fontWeight: 600, color: '#475569', backgroundColor: '#f8fafc', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tên người dùng</th>
-                  <th style={{ padding: '0.85rem 1.5rem', fontSize: '0.75rem', fontWeight: 600, color: '#475569', backgroundColor: '#f8fafc', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Địa chỉ Email</th>
-                  <th style={{ padding: '0.85rem 1.5rem', fontSize: '0.75rem', fontWeight: 600, color: '#475569', backgroundColor: '#f8fafc', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Vai trò hiện tại</th>
-                  <th style={{ padding: '0.85rem 1.5rem', fontSize: '0.75rem', fontWeight: 600, color: '#475569', backgroundColor: '#f8fafc', textTransform: 'uppercase', letterSpacing: '0.05em', width: '320px', textAlign: 'right' }}>Gán vai trò mới</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map(u => (
-                  <tr key={u.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '1rem 1.5rem', fontWeight: 600, color: '#0f172a' }}>{u.full_name}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: '#475569' }}>{u.email}</td>
-                    <td style={{ padding: '1rem 1.5rem' }}>
-                      <span
-                        style={{
-                          display: 'inline-block',
-                          padding: '0.2rem 0.5rem',
-                          borderRadius: '4px',
-                          fontSize: '0.7rem',
-                          fontWeight: 700,
-                          textTransform: 'uppercase',
-                          backgroundColor: u.role === 'admin' ? '#fee2e2' : u.role === 'jury' ? '#fef3c7' : '#dcfce7',
-                          color: u.role === 'admin' ? '#b91c1c' : u.role === 'jury' ? '#b45309' : '#15803d',
-                        }}
-                      >
-                        {u.role}
-                      </span>
-                    </td>
-                    <td style={{ padding: '1rem 1.5rem', textAlign: 'right' }}>
-                      <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
-                        {u.role !== 'admin' && (
-                          <button
-                            onClick={() => updateUserRoleMutation.mutate({ id: u.id, role: 'admin' })}
-                            className="btn btn-secondary"
-                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', borderRadius: '6px' }}
-                            disabled={updateUserRoleMutation.isPending}
-                          >
-                            Set Admin
-                          </button>
-                        )}
-                        {u.role !== 'jury' && (
-                          <button
-                            onClick={() => updateUserRoleMutation.mutate({ id: u.id, role: 'jury' })}
-                            className="btn btn-secondary"
-                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', borderRadius: '6px' }}
-                            disabled={updateUserRoleMutation.isPending}
-                          >
-                            Set Jury
-                          </button>
-                        )}
-                        {u.role !== 'contestant' && (
-                          <button
-                            onClick={() => updateUserRoleMutation.mutate({ id: u.id, role: 'contestant' })}
-                            className="btn btn-secondary"
-                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', borderRadius: '6px' }}
-                            disabled={updateUserRoleMutation.isPending}
-                          >
-                            Set Contestant
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       {subTab === 'announcements' && (
         <div style={{ display: 'grid', gridTemplateColumns: '2.2fr 1.2fr', gap: '1.5rem', alignItems: 'start' }}>

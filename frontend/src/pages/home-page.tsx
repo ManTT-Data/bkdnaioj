@@ -1,14 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { api, type Announcement, type Contest, type PublicStatsSummary, type Task, type TaskStats } from '../lib/api-client';
-import { useAuth } from '../contexts/auth-context';
 import {
   Calendar,
   CheckCircle2,
   Clock,
-  Plus,
-  AlertCircle,
   MapPin,
   Code2,
   Megaphone,
@@ -23,64 +20,13 @@ interface RichAnnouncement extends Announcement {
 }
 
 export const HomePage: React.FC = () => {
-  const { isAdmin } = useAuth();
-  const queryClient = useQueryClient();
-  const [showCreateModal, setShowCreateModal] = useState(false);
 
   // Form State
-  const [title, setTitle] = useState('');
-  const [slug, setSlug] = useState('');
-  const [description, setDescription] = useState('');
-  const [startTime, setStartTime] = useState('');
-  const [endTime, setEndTime] = useState('');
-  const [entryPolicy, setEntryPolicy] = useState<'individual' | 'team' | 'both'>('individual');
-  const [formError, setFormError] = useState<string | null>(null);
-
   // Query contests
   const { data: contests = [], isLoading, error } = useQuery<Contest[]>({
     queryKey: ['contests'],
     queryFn: api.getContests,
   });
-
-  // Create contest mutation
-  const createContestMutation = useMutation({
-    mutationFn: api.createContest,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['contests'] });
-      setShowCreateModal(false);
-      // Reset form
-      setTitle('');
-      setSlug('');
-      setDescription('');
-      setStartTime('');
-      setEndTime('');
-      setEntryPolicy('individual');
-      setFormError(null);
-    },
-    onError: (err: any) => {
-      setFormError(err?.response?.data?.message || 'Failed to create contest.');
-    },
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError(null);
-    if (!title || !slug || !startTime || !endTime) {
-      setFormError('Please fill in all required fields.');
-      return;
-    }
-    createContestMutation.mutate({
-      title,
-      slug,
-      description,
-      start_time: new Date(startTime).toISOString(),
-      end_time: new Date(endTime).toISOString(),
-      entry_policy: entryPolicy,
-      visibility: 'public',
-      max_team_size: entryPolicy === 'team' || entryPolicy === 'both' ? 3 : 1,
-      require_approval: false,
-    });
-  };
 
   // Group contests
   const activeContests = contests.filter(c => {
@@ -366,15 +312,6 @@ export const HomePage: React.FC = () => {
               Cuộc thi sắp diễn ra
             </h3>
             <div className="flex items-center gap-3">
-              {isAdmin && (
-                <button
-                  onClick={() => setShowCreateModal(true)}
-                  className="btn btn-primary flex items-center gap-1.5"
-                  style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', backgroundColor: '#2563eb', borderRadius: '6px' }}
-                >
-                  <Plus size={14} /> Tạo cuộc thi
-                </button>
-              )}
               <Link to="/contests" className="home-section-link">Xem tất cả</Link>
             </div>
           </div>
@@ -573,117 +510,6 @@ export const HomePage: React.FC = () => {
         </div>
 
       </div>
-
-      {/* Creation Modal (Visible to Admin only) */}
-      {showCreateModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.4)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-          padding: '1rem'
-        }}>
-          <div className="panel" style={{ width: '100%', maxWidth: '500px', backgroundColor: 'var(--panel)', marginBottom: 0, borderRadius: '8px' }}>
-            <h3 style={{ marginBottom: '1.5rem' }}>Tạo cuộc thi mới</h3>
-            {formError && (
-              <div className="alert alert-danger flex items-center gap-2">
-                <AlertCircle size={18} />
-                <div>{formError}</div>
-              </div>
-            )}
-            <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label className="form-label">Tên cuộc thi *</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={title}
-                  onChange={(e) => {
-                    setTitle(e.target.value);
-                    setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''));
-                  }}
-                  required
-                  placeholder="Ví dụ: AI Driving Agent Challenge"
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Đường dẫn thân thiện (Slug) *</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={slug}
-                  onChange={(e) => setSlug(e.target.value)}
-                  required
-                  placeholder="Ví dụ: ai-driving-challenge"
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Mô tả ngắn</label>
-                <textarea
-                  className="form-input"
-                  style={{ height: '80px', resize: 'vertical' }}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Mục tiêu cuộc thi, thể lệ, quy tắc..."
-                />
-              </div>
-
-              <div className="grid-2">
-                <div className="form-group">
-                  <label className="form-label">Thời gian bắt đầu *</label>
-                  <input
-                    type="datetime-local"
-                    className="form-input"
-                    value={startTime}
-                    onChange={(e) => setStartTime(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Thời gian kết thúc *</label>
-                  <input
-                    type="datetime-local"
-                    className="form-input"
-                    value={endTime}
-                    onChange={(e) => setEndTime(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Chế độ tham gia</label>
-                <select
-                  className="form-input"
-                  value={entryPolicy}
-                  onChange={(e: any) => setEntryPolicy(e.target.value)}
-                >
-                  <option value="individual">Chỉ cá nhân</option>
-                  <option value="team">Chỉ đội nhóm</option>
-                  <option value="both">Cả hai chế độ</option>
-                </select>
-              </div>
-
-              <div className="flex gap-2" style={{ justifyContent: 'flex-end', marginTop: '1.5rem' }}>
-                <button type="button" onClick={() => setShowCreateModal(false)} className="btn btn-secondary" style={{ borderRadius: '6px' }}>
-                  Hủy
-                </button>
-                <button type="submit" className="btn btn-primary" style={{ backgroundColor: '#2563eb', borderRadius: '6px' }} disabled={createContestMutation.isPending}>
-                  {createContestMutation.isPending ? 'Đang tạo...' : 'Tạo cuộc thi'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

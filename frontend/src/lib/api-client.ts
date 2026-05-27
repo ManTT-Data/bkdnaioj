@@ -565,8 +565,10 @@ export const api = {
     const res = await apiClient.get('/admin/stats');
     return res.data;
   },
-  async listUsers() {
-    const res = await apiClient.get('/admin/users');
+  async listUsers(limit?: number, offset?: number) {
+    const res = await apiClient.get('/admin/users', {
+      params: { limit, offset }
+    });
     return res.data as User[];
   },
   async updateUserRole(id: string, role: string) {

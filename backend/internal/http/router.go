@@ -117,7 +117,7 @@ func registerPhaseDefs(api *echo.Group, q *db.Queries, jwtMgr *security.JWTManag
 }
 
 func registerTasks(api *echo.Group, q *db.Queries, jwtMgr *security.JWTManager, s3 *storage.S3) {
-	h := handlers.NewTaskHandler(q, s3)
+	h := handlers.NewTaskHandler(q, jwtMgr, s3)
 	api.GET("/contests/:id/tasks", h.ListByContest)
 	api.GET("/tasks/:id", h.Get)
 	api.GET("/tasks/:id/statement", h.GetStatement)
