@@ -1,0 +1,30 @@
+{
+  "non_final": {
+    "description": "Upload a predictions.csv file with columns id,prediction. Each id must match one row in the current phase inputs.",
+    "examples": [
+      "predictions.csv"
+    ],
+    "max_files": 1
+  },
+  "final": {
+    "description": "Upload a ZIP containing infer.py plus model.json. The platform runs infer.py against the phase inputs asset to generate predictions.csv before judging.",
+    "examples": [
+      "final_submission.zip"
+    ],
+    "max_files": 1,
+    "inference_entrypoint": "infer.py"
+  },
+  "evaluation": {
+    "required_assets": [
+      "ground_truth",
+      "inputs"
+    ],
+    "description": "BTC uploads ground_truth.csv as asset key ground_truth and inputs.csv as asset key inputs for each public/private evaluation set."
+  },
+  "task_assets": {
+    "required_assets": [
+      "judge.py"
+    ],
+    "description": "BTC uploads the shared task-level judge.py once. Public/private and normal/final phases all use this judge."
+  }
+}

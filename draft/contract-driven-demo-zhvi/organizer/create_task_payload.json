@@ -1,0 +1,40 @@
+{
+  "slug": "zh-vi-machine-translation",
+  "title": "Dịch Thuật Hoa - Việt",
+  "description": "Xây dựng mô hình dịch máy từ tiếng Trung giản thể sang tiếng Việt. Non-final phases nhận CSV bản dịch đã sinh sẵn; final phases nhận code/checkpoint để hệ thống tự chạy inference trên input public/private rồi chấm bằng SacreBLEU.",
+  "problem_statement_url": null,
+  "submission_schema": {
+    "non_final": {
+      "description": "Upload a UTF-8 CSV with columns tieng_trung,tieng_viet. tieng_trung must follow the current phase input order; tieng_viet is the Chinese-to-Vietnamese translation.",
+      "examples": [
+        "submission.csv",
+        "public_submission.csv"
+      ],
+      "max_files": 1
+    },
+    "final": {
+      "description": "Upload a ZIP containing infer.py plus any model/checkpoint/tokenizer files. The platform runs infer.py against the phase inputs asset and expects it to generate submission.csv.",
+      "examples": [
+        "final_submission.zip"
+      ],
+      "max_files": 1,
+      "inference_entrypoint": "infer.py"
+    },
+    "evaluation": {
+      "required_assets": [
+        "ground_truth",
+        "inputs"
+      ],
+      "description": "BTC uploads inputs.zh as asset key inputs and ground_truth.vi as asset key ground_truth for each public/private evaluation set."
+    },
+    "task_assets": {
+      "required_assets": [
+        "judge.py"
+      ],
+      "description": "BTC uploads the shared task-level judge.py once. Public/private and normal/final phases all use this judge."
+    }
+  },
+  "score_label": "SacreBLEU",
+  "higher_is_better": true,
+  "sort_order": 3
+}

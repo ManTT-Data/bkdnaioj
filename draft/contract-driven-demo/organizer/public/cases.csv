@@ -1,0 +1,5 @@
+id,source_label,target_label
+pub_001,red,blue
+pub_002,green,yellow
+pub_003,blue,red
+pub_004,yellow,green

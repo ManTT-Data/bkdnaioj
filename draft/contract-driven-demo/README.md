@@ -2,6 +2,8 @@
 
 Demo này dùng để test luồng nộp/chấm không hardcode `predictions.csv`.
 
+Bài toán mẫu là targeted adversarial patch trên ảnh PNG 64x64. BTC cung cấp ảnh input thật trong `inputs.zip`, nhãn mục tiêu trong `ground_truth.json`, và một `judge.py` dùng chung cho public/private, normal/final. Submission của thí sinh cũng là ZIP chứa PNG thật hoặc code/checkpoint sinh PNG.
+
 ## 1. Tạo task
 
 Khi BTC tạo task, copy nội dung trong:
@@ -37,17 +39,24 @@ Với public evaluation set, upload:
 
 ```text
 organizer/public/ground_truth.json asset_key: ground_truth
-organizer/public/inputs.json       asset_key: inputs
+organizer/public/inputs.zip        asset_key: inputs
 ```
 
 Với private evaluation set, upload:
 
 ```text
 organizer/private/ground_truth.json asset_key: ground_truth
-organizer/private/inputs.json       asset_key: inputs
+organizer/private/inputs.zip        asset_key: inputs
 ```
 
-Trong demo này file cụ thể là JSON cho dễ đọc, nhưng asset key trên hệ thống là `inputs` và `ground_truth`. Contest thật có thể dùng CSV, ZIP ảnh, parquet, folder dữ liệu, hoặc format bất kỳ mà `infer.py`/`judge.py` biết đọc.
+`inputs.zip` chứa:
+
+```text
+images/<case_id>.png
+metadata.json
+```
+
+`ground_truth.json` chứa target label và patch RGB kỳ vọng cho từng case. Asset key trên hệ thống vẫn là `inputs` và `ground_truth`; worker sẽ alias file upload về đúng key này trong `work/assets/`.
 
 `inputs` là data input để final inference chạy. `ground_truth` là đáp án/nhãn ẩn để `judge.py` chấm. `judge.py` đọc artifact từ `--submission-dir`, đọc ground truth từ `--assets-dir`, và trả JSON score ra stdout.
 
@@ -69,9 +78,10 @@ File này chứa output đã sinh sẵn:
 
 ```text
 adversarial_images/
-  img_001.png
-  img_002.png
-  img_003.png
+  pub_001.png
+  pub_002.png
+  pub_003.png
+  pub_004.png
 manifest.json
 ```
 
@@ -91,7 +101,7 @@ File này chứa checkpoint/code inference:
 
 ```text
 infer.py
-checkpoint.txt
+checkpoint.json
 config.json
 ```
 
@@ -107,4 +117,12 @@ Với public set:
 Với private set:
 
 - `non_final_private_submission.zip` đạt `display_score = 100`
-- `final_submission.zip` cũng đạt `display_score = 100` vì `infer.py` đọc `reference.json` của evaluation set hiện tại.
+- `final_submission.zip` cũng đạt `display_score = 100` vì `infer.py` đọc `inputs` của evaluation set hiện tại.
+
+## 6. Tạo lại data
+
+Nếu cần regenerate toàn bộ ảnh, ground truth và ZIP submission:
+
+```bash
+python draft/contract-driven-demo/generate_demo_data.py
+```

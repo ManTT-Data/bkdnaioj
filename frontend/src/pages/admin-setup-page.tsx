@@ -204,16 +204,85 @@ export const AdminSetupPage: React.FC = () => {
   // Mutations
   const createTaskMutation = useMutation({
     mutationFn: (payload: any) => api.createTask(contestId!, payload),
-    onSuccess: () => {
+    onSuccess: async (newTask) => {
       setTaskTitle('');
       setTaskSlug('');
       setTaskDesc('');
       setTaskScoreLabel('Accuracy');
       setTaskHigherBetter(true);
-      setTaskSortOrder(tasks.length + 1);
+      setTaskSortOrder(tasks.length + 2);
       setTaskDatasetUrl('');
       setTaskError(null);
+      
+      try {
+        // 1. Auto-create public & private evaluation sets
+        const publicSet = await api.createEvaluationSet(newTask.id, { key: 'public', title: 'Public Evaluation Set' });
+        const privateSet = await api.createEvaluationSet(newTask.id, { key: 'private', title: 'Private Evaluation Set' });
+
+        // 2. Auto-create concrete phases based on current phaseDefs
+        if (phaseDefs && phaseDefs.length > 0) {
+          let copiedPhases: { [defId: string]: any } = {};
+          
+          // Try compiling from currently loaded taskPhasesMap
+          for (const taskId in taskPhasesMap) {
+            const plist = taskPhasesMap[taskId] || [];
+            for (const p of plist) {
+              if (p.contest_phase_def_id && !copiedPhases[p.contest_phase_def_id]) {
+                copiedPhases[p.contest_phase_def_id] = p;
+              }
+            }
+          }
+
+          // If empty, try fetching from another task in the same contest
+          const otherTask = tasks.find(t => t.id !== newTask.id);
+          if (otherTask && Object.keys(copiedPhases).length === 0) {
+            try {
+              const plist = await api.getPhasesByTask(otherTask.id);
+              for (const p of plist) {
+                copiedPhases[p.contest_phase_def_id] = p;
+              }
+            } catch (e) {
+              console.error("Failed to fetch phases from other task", e);
+            }
+          }
+
+          // Create concrete phase for each phaseDef
+          for (const def of phaseDefs) {
+            const refP = copiedPhases[def.id];
+            
+            const openTime = refP?.open_time || contest?.start_time || new Date().toISOString();
+            const closeTime = refP?.close_time || contest?.end_time || new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
+            const evalSetId = (def.key === 'private_test' || def.key === 'final_private') ? privateSet.id : publicSet.id;
+
+            const payload = {
+              contest_phase_def_id: def.id,
+              evaluation_set_id: evalSetId,
+              slug: `${newTask.slug}-${def.key}-${Date.now().toString().slice(-4)}`,
+              title: `${newTask.title} - ${def.title}`,
+              description: `Vòng thi ${def.title} cho bài tập ${newTask.title}`,
+              open_time: openTime,
+              close_time: closeTime,
+              judge_key: refP?.judge_key || 'judge.py',
+              submission_limit: refP?.submission_limit !== undefined ? refP.submission_limit : null,
+              leaderboard_mode: refP?.leaderboard_mode || 'best',
+              allow_official_submit: true,
+              allow_virtual_submit: true,
+              allow_practice_submit: true,
+              display_scores: refP?.display_scores !== undefined ? refP.display_scores : true,
+              is_final: def.key.includes('final'),
+              sort_order: def.sort_order,
+            };
+
+            await api.createPhase(newTask.id, payload);
+          }
+        }
+      } catch (e) {
+        console.error("Auto setup phase and evaluation sets failed", e);
+      }
+
       refetchTasks();
+      queryClient.invalidateQueries({ queryKey: ['taskEvalSets', contestId] });
+      queryClient.invalidateQueries({ queryKey: ['taskPhases', contestId] });
     },
     onError: (err: any) => {
       setTaskError(err?.response?.data?.message || 'Failed to create task.');

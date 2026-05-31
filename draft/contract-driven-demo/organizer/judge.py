@@ -1,31 +1,45 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import zipfile
+from pathlib import Path
+
+from PIL import Image
 
 
-def load_ground_truth(assets_dir: str) -> dict:
-    with open(os.path.join(assets_dir, "ground_truth"), "r", encoding="utf-8") as fh:
-        return json.load(fh)
+def load_ground_truth(assets_dir: Path) -> dict:
+    return json.loads((assets_dir / "ground_truth").read_text(encoding="utf-8"))
 
 
-def read_submission_file(submission_dir: str, relative_path: str) -> str | None:
-    direct_path = os.path.join(submission_dir, relative_path)
-    if os.path.exists(direct_path):
-        with open(direct_path, "r", encoding="utf-8") as fh:
-            return fh.read()
+def read_submission_png(submission_dir: Path, relative_path: str) -> Image.Image | None:
+    direct_path = submission_dir / relative_path
+    if direct_path.exists():
+        return Image.open(direct_path).convert("RGB")
 
     for name in os.listdir(submission_dir):
-        path = os.path.join(submission_dir, name)
-        if zipfile.is_zipfile(path):
-            with zipfile.ZipFile(path) as zf:
-                try:
-                    return zf.read(relative_path).decode("utf-8")
-                except KeyError:
-                    continue
+        path = submission_dir / name
+        if not zipfile.is_zipfile(path):
+            continue
+        with zipfile.ZipFile(path) as zf:
+            try:
+                return Image.open(io.BytesIO(zf.read(relative_path))).convert("RGB")
+            except KeyError:
+                continue
     return None
+
+
+def classify_patch(image: Image.Image, patch_box: tuple[int, int, int, int], labels: dict[str, tuple[int, int, int]]) -> str:
+    patch = image.crop(patch_box)
+    pixels = list(patch.getdata())
+    mean_rgb = tuple(round(sum(pixel[i] for pixel in pixels) / len(pixels)) for i in range(3))
+    return min(labels, key=lambda label: color_distance(mean_rgb, labels[label]))
+
+
+def color_distance(a: tuple[int, int, int], b: tuple[int, int, int]) -> int:
+    return sum((a[i] - b[i]) ** 2 for i in range(3))
 
 
 def main() -> None:
@@ -36,32 +50,55 @@ def main() -> None:
     parser.add_argument("--context", required=True)
     args = parser.parse_args()
 
-    gt = load_ground_truth(args.assets_dir)
-    total = len(gt["cases"])
-    matched = 0
+    ground_truth = load_ground_truth(Path(args.assets_dir))
+    patch_box = tuple(ground_truth["patch_box_xyxy"])
+    labels = {
+        case["target_label"]: tuple(case["expected_patch_rgb"])
+        for case in ground_truth["cases"]
+    }
+
+    total = len(ground_truth["cases"])
+    correct = 0
     missing = []
+    details = []
 
-    for case in gt["cases"]:
-        rel = f"adversarial_images/{case['id']}.png"
-        content = read_submission_file(args.submission_dir, rel)
-        if content is None:
-            missing.append(rel)
+    for case in ground_truth["cases"]:
+        rel_path = f"adversarial_images/{case['id']}.png"
+        image = read_submission_png(Path(args.submission_dir), rel_path)
+        if image is None:
+            missing.append(rel_path)
+            details.append({"id": case["id"], "status": "missing"})
             continue
-        if case["expected_marker"] in content:
-            matched += 1
+        predicted = classify_patch(image, patch_box, labels)
+        ok = predicted == case["target_label"]
+        correct += 1 if ok else 0
+        details.append(
+            {
+                "id": case["id"],
+                "target_label": case["target_label"],
+                "predicted_label": predicted,
+                "correct": ok,
+            }
+        )
 
-    score = matched / total if total else 0.0
-    print(json.dumps({
-        "status": "success",
-        "raw_score": score,
-        "display_score": round(score * 100, 4),
-            "payload": {
-            "dataset": gt["dataset"],
-            "matched": matched,
-            "total": total,
-            "missing": missing
-        }
-    }))
+    score = correct / total if total else 0.0
+    print(
+        json.dumps(
+            {
+                "status": "success",
+                "raw_score": score,
+                "display_score": round(score * 100, 4),
+                "payload": {
+                    "metric": ground_truth["metric"],
+                    "dataset": ground_truth["dataset"],
+                    "correct": correct,
+                    "total": total,
+                    "missing": missing,
+                    "details": details,
+                },
+            }
+        )
+    )
 
 
 if __name__ == "__main__":

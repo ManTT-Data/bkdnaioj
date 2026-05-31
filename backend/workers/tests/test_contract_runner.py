@@ -66,6 +66,12 @@ class ContractRunnerTest(unittest.TestCase):
             with open(artifact, "wb") as fh:
                 fh.write(b"fake image archive")
             judge = os.path.join(td, "judge.py")
+            ground_truth = os.path.join(td, "ground_truth.csv")
+            inputs = os.path.join(td, "inputs.zip")
+            with open(ground_truth, "w", encoding="utf-8") as fh:
+                fh.write("id,label\n1,cat\n")
+            with open(inputs, "wb") as fh:
+                fh.write(b"fake public inputs")
             self._write_script(
                 judge,
                 """
@@ -77,6 +83,8 @@ class ContractRunnerTest(unittest.TestCase):
                 p.add_argument("--context")
                 args = p.parse_args()
                 assert os.path.exists(os.path.join(args.submission_dir, "images.zip"))
+                assert os.path.exists(os.path.join(args.assets_dir, "ground_truth"))
+                assert os.path.exists(os.path.join(args.assets_dir, "inputs"))
                 print(json.dumps({"status":"success","raw_score":0.7,"display_score":70,"payload":{"mode":"non_final"}}))
                 """,
             )
@@ -86,6 +94,10 @@ class ContractRunnerTest(unittest.TestCase):
                 td,
                 SubmissionRef(is_final=False),
                 [FileRef("images.zip", artifact)],
+                [
+                    AssetRef("ground_truth", "ground_truth.csv", ground_truth),
+                    AssetRef("inputs", "inputs.zip", inputs),
+                ],
                 [AssetRef("judge.py", "judge.py", judge)],
             )
 
@@ -114,6 +126,12 @@ class ContractRunnerTest(unittest.TestCase):
                     ).strip(),
                 )
             judge = os.path.join(td, "judge.py")
+            ground_truth = os.path.join(td, "ground_truth.csv")
+            inputs = os.path.join(td, "inputs.zip")
+            with open(ground_truth, "w", encoding="utf-8") as fh:
+                fh.write("id,label\n1,cat\n")
+            with open(inputs, "wb") as fh:
+                fh.write(b"fake private inputs")
             self._write_script(
                 judge,
                 """
@@ -125,6 +143,8 @@ class ContractRunnerTest(unittest.TestCase):
                 p.add_argument("--context")
                 args = p.parse_args()
                 assert os.path.exists(os.path.join(args.submission_dir, "generated_images.zip"))
+                assert os.path.exists(os.path.join(args.assets_dir, "ground_truth"))
+                assert os.path.exists(os.path.join(args.assets_dir, "inputs"))
                 print(json.dumps({"status":"success","raw_score":0.9,"display_score":90,"payload":{"mode":"final"}}))
                 """,
             )
@@ -134,6 +154,10 @@ class ContractRunnerTest(unittest.TestCase):
                 td,
                 SubmissionRef(is_final=True, submission_schema='{"final":{"inference_entrypoint":"infer.py"}}'),
                 [FileRef("final_submission.zip", final_zip)],
+                [
+                    AssetRef("ground_truth", "ground_truth.csv", ground_truth),
+                    AssetRef("inputs", "inputs.zip", inputs),
+                ],
                 [AssetRef("judge.py", "judge.py", judge)],
             )
 

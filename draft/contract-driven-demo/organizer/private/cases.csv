@@ -1,0 +1,5 @@
+id,source_label,target_label
+priv_101,red,green
+priv_102,green,blue
+priv_103,blue,yellow
+priv_104,yellow,red

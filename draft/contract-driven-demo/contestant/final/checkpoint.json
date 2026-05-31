@@ -1,0 +1,31 @@
+{
+  "model_name": "patch-color-targeter-v1",
+  "label_to_patch_rgb": {
+    "red": [
+      220,
+      38,
+      38
+    ],
+    "green": [
+      22,
+      163,
+      74
+    ],
+    "blue": [
+      37,
+      99,
+      235
+    ],
+    "yellow": [
+      234,
+      179,
+      8
+    ]
+  },
+  "patch_box_xyxy": [
+    48,
+    48,
+    64,
+    64
+  ]
+}

@@ -1,5 +1,11 @@
 {
-  "type": "precomputed_adversarial_outputs",
-  "description": "Demo private non-final artifact. Files use .png names but contain text markers so the demo has no image dependencies."
+  "submission_type": "precomputed_adversarial_images",
+  "dataset": "private",
+  "image_format": "png",
+  "cases": [
+    "priv_101",
+    "priv_102",
+    "priv_103",
+    "priv_104"
+  ]
 }
-
