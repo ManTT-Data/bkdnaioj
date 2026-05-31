@@ -3,11 +3,13 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v4"
 	"github.com/mank1/olpai-backend/db"
 	"github.com/mank1/olpai-backend/internal/http/dto"
@@ -136,6 +138,65 @@ func (h *PhaseHandler) setFrozen(c echo.Context, frozen bool) error {
 			return mw.ErrNotFound("phase not found")
 		}
 		return mw.ErrInternal("freeze failed")
+	}
+	return c.JSON(http.StatusOK, dto.PhaseToResponse(phase))
+}
+
+// PATCH /api/v1/phases/:id
+func (h *PhaseHandler) Update(c echo.Context) error {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return mw.ErrBadRequest("invalid phase id")
+	}
+	var req struct {
+		Title           *string    `json:"title"`
+		Description     *string    `json:"description"`
+		OpenTime        *time.Time `json:"open_time"`
+		CloseTime       *time.Time `json:"close_time"`
+		JudgeKey        *string    `json:"judge_key"`
+		SubmissionLimit *int32     `json:"submission_limit"`
+		DisplayScores   *bool      `json:"display_scores"`
+		IsFrozen        *bool      `json:"is_frozen"`
+		LeaderboardMode *string    `json:"leaderboard_mode"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return mw.ErrBadRequest("invalid request body")
+	}
+
+	var openTime pgtype.Timestamptz
+	if req.OpenTime != nil {
+		openTime.Time = *req.OpenTime
+		openTime.Valid = true
+	}
+	var closeTime pgtype.Timestamptz
+	if req.CloseTime != nil {
+		closeTime.Time = *req.CloseTime
+		closeTime.Valid = true
+	}
+
+	var leaderboardMode *db.LeaderboardMode
+	if req.LeaderboardMode != nil {
+		val := db.LeaderboardMode(*req.LeaderboardMode)
+		leaderboardMode = &val
+	}
+
+	phase, err := h.q.UpdatePhase(c.Request().Context(), db.UpdatePhaseParams{
+		ID:              id,
+		Title:           req.Title,
+		Description:     req.Description,
+		OpenTime:        openTime,
+		CloseTime:       closeTime,
+		JudgeKey:        req.JudgeKey,
+		SubmissionLimit: req.SubmissionLimit,
+		DisplayScores:   req.DisplayScores,
+		IsFrozen:        req.IsFrozen,
+		LeaderboardMode: leaderboardMode,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return mw.ErrNotFound("phase not found")
+		}
+		return mw.ErrInternal("update phase failed: " + err.Error())
 	}
 	return c.JSON(http.StatusOK, dto.PhaseToResponse(phase))
 }

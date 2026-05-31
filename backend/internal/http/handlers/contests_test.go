@@ -176,7 +176,36 @@ func TestContestHandler_Delete_Success(t *testing.T) {
 
 func TestContestHandler_Publish_Success(t *testing.T) {
 	contestID := uuid.New()
+	taskID := uuid.New()
+	publicSetID := uuid.New()
+	privateSetID := uuid.New()
 	mock := &db.MockQuerier{
+		ListTasksByContestFunc: func(ctx context.Context, id uuid.UUID) ([]db.Task, error) {
+			assert.Equal(t, contestID, id)
+			return []db.Task{{
+				ID:               taskID,
+				ContestID:        contestID,
+				Slug:             "classification",
+				SubmissionSchema: []byte(`{"task_assets":{"required_assets":["judge.py"]},"evaluation":{"required_assets":["ground_truth","inputs"]}}`),
+			}}, nil
+		},
+		ListTaskAssetsFunc: func(ctx context.Context, id uuid.UUID) ([]db.TaskAsset, error) {
+			assert.Equal(t, taskID, id)
+			return []db.TaskAsset{{TaskID: taskID, AssetKey: "judge.py"}}, nil
+		},
+		ListEvaluationSetsByTaskFunc: func(ctx context.Context, id uuid.UUID) ([]db.TaskEvaluationSet, error) {
+			assert.Equal(t, taskID, id)
+			return []db.TaskEvaluationSet{
+				{ID: publicSetID, TaskID: taskID, Key: db.EvaluationSetKeyPublic},
+				{ID: privateSetID, TaskID: taskID, Key: db.EvaluationSetKeyPrivate},
+			}, nil
+		},
+		ListEvaluationSetAssetsFunc: func(ctx context.Context, id uuid.UUID) ([]db.EvaluationSetAsset, error) {
+			return []db.EvaluationSetAsset{
+				{EvaluationSetID: id, AssetKey: "ground_truth"},
+				{EvaluationSetID: id, AssetKey: "inputs"},
+			}, nil
+		},
 		UpdateContestStatusFunc: func(ctx context.Context, arg db.UpdateContestStatusParams) (db.Contest, error) {
 			return db.Contest{
 				ID:          contestID,
@@ -199,4 +228,48 @@ func TestContestHandler_Publish_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	resp := parseBody(t, rec)
 	assert.Equal(t, "registration_open", resp["status"])
+}
+
+func TestContestHandler_Publish_BlocksMissingAssets(t *testing.T) {
+	contestID := uuid.New()
+	taskID := uuid.New()
+	setID := uuid.New()
+	statusUpdated := false
+	mock := &db.MockQuerier{
+		ListTasksByContestFunc: func(ctx context.Context, id uuid.UUID) ([]db.Task, error) {
+			return []db.Task{{
+				ID:               taskID,
+				ContestID:        contestID,
+				Slug:             "classification",
+				SubmissionSchema: []byte(`{"task_assets":{"required_assets":["judge.py"]},"evaluation":{"required_assets":["ground_truth","inputs"]}}`),
+			}}, nil
+		},
+		ListTaskAssetsFunc: func(ctx context.Context, id uuid.UUID) ([]db.TaskAsset, error) {
+			return nil, nil
+		},
+		ListEvaluationSetsByTaskFunc: func(ctx context.Context, id uuid.UUID) ([]db.TaskEvaluationSet, error) {
+			return []db.TaskEvaluationSet{{ID: setID, TaskID: taskID, Key: db.EvaluationSetKeyPublic}}, nil
+		},
+		ListEvaluationSetAssetsFunc: func(ctx context.Context, id uuid.UUID) ([]db.EvaluationSetAsset, error) {
+			return []db.EvaluationSetAsset{{EvaluationSetID: setID, AssetKey: "ground_truth"}}, nil
+		},
+		UpdateContestStatusFunc: func(ctx context.Context, arg db.UpdateContestStatusParams) (db.Contest, error) {
+			statusUpdated = true
+			return db.Contest{}, nil
+		},
+	}
+	h := NewContestHandler(mock)
+	c, _ := newTestContext("POST", "/api/v1/contests/"+contestID.String()+"/publish", "")
+	c.SetParamNames("id")
+	c.SetParamValues(contestID.String())
+
+	err := h.Publish(c)
+
+	assert.Error(t, err)
+	assert.False(t, statusUpdated)
+	appErr, ok := err.(*mw.AppError)
+	assert.True(t, ok)
+	assert.Equal(t, http.StatusBadRequest, appErr.Status)
+	assert.Contains(t, appErr.Message, "missing task asset judge.py")
+	assert.Contains(t, appErr.Message, "missing asset inputs")
 }

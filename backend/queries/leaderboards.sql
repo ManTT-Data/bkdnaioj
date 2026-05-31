@@ -1,7 +1,14 @@
 -- Task-phase leaderboard
 
 -- name: GetTaskPhaseLeaderboard :many
-SELECT lb.*, ce.display_name, ce.entry_type, ce.entry_mode
+SELECT lb.*, ce.display_name, ce.entry_type, ce.entry_mode,
+       COALESCE(
+         (SELECT array_agg(u.email::text)::text[]
+          FROM contest_entry_members cem
+          JOIN users u ON u.id = cem.user_id
+          WHERE cem.contest_entry_id = ce.id),
+         ARRAY[]::text[]
+       ) AS user_emails
 FROM task_phase_leaderboard_entries lb
 JOIN contest_entries ce ON ce.id = lb.contest_entry_id
 WHERE lb.phase_id = $1
@@ -27,7 +34,14 @@ RETURNING *;
 -- Contest-phase leaderboard
 
 -- name: GetContestPhaseLeaderboard :many
-SELECT lb.*, ce.display_name, ce.entry_type, ce.entry_mode
+SELECT lb.*, ce.display_name, ce.entry_type, ce.entry_mode,
+       COALESCE(
+         (SELECT array_agg(u.email::text)::text[]
+          FROM contest_entry_members cem
+          JOIN users u ON u.id = cem.user_id
+          WHERE cem.contest_entry_id = ce.id),
+         ARRAY[]::text[]
+       ) AS user_emails
 FROM contest_phase_leaderboard_entries lb
 JOIN contest_entries ce ON ce.id = lb.contest_entry_id
 WHERE lb.contest_phase_def_id = $1
@@ -48,3 +62,176 @@ ON CONFLICT (contest_phase_def_id, contest_entry_id) DO UPDATE SET
   is_frozen = EXCLUDED.is_frozen,
   updated_at = now()
 RETURNING *;
+
+-- name: RecomputeTaskPhaseLeaderboard :exec
+WITH candidate AS (
+  SELECT
+    s.contest_id,
+    s.task_id,
+    s.phase_id,
+    s.contest_entry_id,
+    s.id AS submission_id,
+    s.display_score,
+    row_number() OVER (
+      PARTITION BY s.contest_entry_id
+      ORDER BY
+        s.is_final DESC,
+        CASE WHEN sqlc.arg('leaderboard_mode')::leaderboard_mode = 'latest' THEN s.submitted_at END DESC NULLS LAST,
+        CASE WHEN sqlc.arg('leaderboard_mode')::leaderboard_mode = 'best' AND sqlc.arg('higher_is_better')::boolean THEN s.display_score END DESC NULLS LAST,
+        CASE WHEN sqlc.arg('leaderboard_mode')::leaderboard_mode = 'best' AND NOT sqlc.arg('higher_is_better')::boolean THEN s.display_score END ASC NULLS LAST,
+        s.submitted_at DESC
+    ) AS rn,
+    count(*) OVER (PARTITION BY s.contest_entry_id) AS entries_count
+  FROM submissions s
+  WHERE s.phase_id = sqlc.arg('phase_id')::uuid
+    AND s.status = 'done'
+    AND s.display_score IS NOT NULL
+),
+chosen AS (
+  SELECT * FROM candidate WHERE rn = 1
+),
+chosen_with_max AS (
+  SELECT c.*,
+         MAX(c.display_score) OVER() as max_phase_score
+  FROM chosen c
+),
+ranked AS (
+  SELECT
+    c.*,
+    dense_rank() OVER (
+      ORDER BY
+        CASE WHEN sqlc.arg('leaderboard_mode')::leaderboard_mode = 'best' AND sqlc.arg('higher_is_better')::boolean THEN c.display_score END DESC NULLS LAST,
+        CASE WHEN sqlc.arg('leaderboard_mode')::leaderboard_mode = 'best' AND NOT sqlc.arg('higher_is_better')::boolean THEN c.display_score END ASC NULLS LAST,
+        c.display_score DESC NULLS LAST
+    )::int AS rank
+  FROM chosen_with_max c
+)
+INSERT INTO task_phase_leaderboard_entries (
+  contest_id, task_id, phase_id, contest_entry_id,
+  rank, score, raw_score, score_breakdown, chosen_submission_id, entries_count,
+  is_frozen, is_disqualified
+)
+SELECT
+  r.contest_id,
+  r.task_id,
+  r.phase_id,
+  r.contest_entry_id,
+  r.rank,
+  CASE 
+    WHEN ct.scale_scores = TRUE THEN
+      CASE 
+        WHEN COALESCE(r.max_phase_score, 0) > 0 THEN (r.display_score / r.max_phase_score) * 100
+        ELSE 0
+      END
+    ELSE r.display_score
+  END AS score,
+  r.display_score AS raw_score,
+  NULL::jsonb,
+  r.submission_id,
+  r.entries_count,
+  p.is_frozen,
+  (ce.status = 'disqualified')
+FROM ranked r
+JOIN phases p ON p.id = r.phase_id
+JOIN contest_entries ce ON ce.id = r.contest_entry_id
+JOIN contests ct ON ct.id = r.contest_id
+ON CONFLICT (phase_id, contest_entry_id) DO UPDATE SET
+  rank = EXCLUDED.rank,
+  score = EXCLUDED.score,
+  raw_score = EXCLUDED.raw_score,
+  score_breakdown = EXCLUDED.score_breakdown,
+  chosen_submission_id = EXCLUDED.chosen_submission_id,
+  entries_count = EXCLUDED.entries_count,
+  is_frozen = EXCLUDED.is_frozen,
+  updated_at = now();
+
+-- name: RecomputeContestPhaseLeaderboard :exec
+WITH phases_in_def AS (
+  SELECT p.id AS phase_id, p.task_id, p.leaderboard_mode, t.higher_is_better, t.contest_id
+  FROM phases p
+  JOIN tasks t ON t.id = p.task_id
+  WHERE p.contest_phase_def_id = sqlc.arg('contest_phase_def_id')::uuid
+    AND t.contest_id = sqlc.arg('contest_id')::uuid
+),
+per_phase_choice AS (
+  SELECT
+    s.contest_id,
+    s.phase_id,
+    s.contest_entry_id,
+    s.id AS submission_id,
+    s.display_score,
+    row_number() OVER (
+      PARTITION BY s.phase_id, s.contest_entry_id
+      ORDER BY
+        s.is_final DESC,
+        CASE WHEN pid.leaderboard_mode = 'latest' THEN s.submitted_at END DESC NULLS LAST,
+        CASE WHEN pid.leaderboard_mode = 'best' AND pid.higher_is_better THEN s.display_score END DESC NULLS LAST,
+        CASE WHEN pid.leaderboard_mode = 'best' AND NOT pid.higher_is_better THEN s.display_score END ASC NULLS LAST,
+        s.submitted_at DESC
+    ) AS rn
+  FROM submissions s
+  JOIN phases_in_def pid ON pid.phase_id = s.phase_id
+  WHERE s.status = 'done'
+    AND s.display_score IS NOT NULL
+),
+chosen AS (
+  SELECT * FROM per_phase_choice WHERE rn = 1
+),
+chosen_with_max AS (
+  SELECT c.*,
+         MAX(c.display_score) OVER(PARTITION BY c.phase_id) as max_phase_score
+  FROM chosen c
+),
+agg AS (
+  SELECT
+    c.contest_id,
+    sqlc.arg('contest_phase_def_id')::uuid AS contest_phase_def_id,
+    c.contest_entry_id,
+    SUM(
+      CASE 
+        WHEN ct.scale_scores = TRUE THEN
+          CASE 
+            WHEN COALESCE(c.max_phase_score, 0) > 0 THEN (c.display_score / c.max_phase_score) * 100
+            ELSE 0
+          END
+        ELSE c.display_score
+      END
+    ) AS total_score,
+    SUM(c.display_score) AS raw_score,
+    COUNT(*)::int AS entries_count
+  FROM chosen_with_max c
+  JOIN contests ct ON ct.id = c.contest_id
+  GROUP BY c.contest_id, c.contest_entry_id, ct.scale_scores
+),
+ranked AS (
+  SELECT
+    a.*,
+    dense_rank() OVER (ORDER BY a.total_score DESC NULLS LAST)::int AS rank
+  FROM agg a
+)
+INSERT INTO contest_phase_leaderboard_entries (
+  contest_id, contest_phase_def_id, contest_entry_id,
+  rank, score, raw_score, score_breakdown, entries_count,
+  is_frozen, is_disqualified
+)
+SELECT
+  r.contest_id,
+  r.contest_phase_def_id,
+  r.contest_entry_id,
+  r.rank,
+  r.total_score,
+  r.raw_score,
+  NULL::jsonb,
+  r.entries_count,
+  false,
+  (ce.status = 'disqualified')
+FROM ranked r
+JOIN contest_entries ce ON ce.id = r.contest_entry_id
+ON CONFLICT (contest_phase_def_id, contest_entry_id) DO UPDATE SET
+  rank = EXCLUDED.rank,
+  score = EXCLUDED.score,
+  raw_score = EXCLUDED.raw_score,
+  score_breakdown = EXCLUDED.score_breakdown,
+  entries_count = EXCLUDED.entries_count,
+  is_frozen = EXCLUDED.is_frozen,
+  updated_at = now();

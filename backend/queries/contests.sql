@@ -2,11 +2,12 @@
 INSERT INTO contests (
   slug, title, description, banner_url, status, entry_policy,
   registration_start, registration_end, start_time, end_time,
-  visibility, rules_json, created_by, max_team_size, require_approval
+  visibility, rules_json, created_by, max_team_size, require_approval,
+  scale_scores
 ) VALUES (
   $1, $2, $3, $4, 'draft', $5,
   $6, $7, $8, $9,
-  $10, '{}'::jsonb, $11, $12, $13
+  $10, $11::varchar::jsonb, $12, $13, $14, $15
 )
 RETURNING *;
 
@@ -33,9 +34,10 @@ UPDATE contests SET
   start_time = COALESCE(sqlc.narg('start_time'), start_time),
   end_time = COALESCE(sqlc.narg('end_time'), end_time),
   visibility = COALESCE(sqlc.narg('visibility')::contest_visibility, visibility),
-  rules_json = COALESCE(sqlc.narg('rules_json')::jsonb, rules_json),
+  rules_json = COALESCE(sqlc.narg('rules_json')::varchar::jsonb, rules_json),
   max_team_size = COALESCE(sqlc.narg('max_team_size'), max_team_size),
   require_approval = COALESCE(sqlc.narg('require_approval'), require_approval),
+  scale_scores = COALESCE(sqlc.narg('scale_scores'), scale_scores),
   updated_at = now()
 WHERE id = $1
 RETURNING *;

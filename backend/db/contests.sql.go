@@ -16,13 +16,14 @@ const createContest = `-- name: CreateContest :one
 INSERT INTO contests (
   slug, title, description, banner_url, status, entry_policy,
   registration_start, registration_end, start_time, end_time,
-  visibility, rules_json, created_by, max_team_size, require_approval
+  visibility, rules_json, created_by, max_team_size, require_approval,
+  scale_scores
 ) VALUES (
   $1, $2, $3, $4, 'draft', $5,
   $6, $7, $8, $9,
-  $10, '{}'::jsonb, $11, $12, $13
+  $10, $11::varchar::jsonb, $12, $13, $14, $15
 )
-RETURNING id, slug, title, description, banner_url, status, entry_policy, registration_start, registration_end, start_time, end_time, visibility, rules_json, created_by, max_team_size, require_approval, created_at, updated_at
+RETURNING id, slug, title, description, banner_url, status, entry_policy, registration_start, registration_end, start_time, end_time, visibility, rules_json, created_by, max_team_size, require_approval, created_at, updated_at, scale_scores
 `
 
 type CreateContestParams struct {
@@ -36,9 +37,11 @@ type CreateContestParams struct {
 	StartTime         pgtype.Timestamptz `json:"start_time"`
 	EndTime           pgtype.Timestamptz `json:"end_time"`
 	Visibility        ContestVisibility  `json:"visibility"`
+	Column11          string             `json:"column_11"`
 	CreatedBy         pgtype.UUID        `json:"created_by"`
 	MaxTeamSize       int32              `json:"max_team_size"`
 	RequireApproval   bool               `json:"require_approval"`
+	ScaleScores       bool               `json:"scale_scores"`
 }
 
 func (q *Queries) CreateContest(ctx context.Context, arg CreateContestParams) (Contest, error) {
@@ -53,9 +56,11 @@ func (q *Queries) CreateContest(ctx context.Context, arg CreateContestParams) (C
 		arg.StartTime,
 		arg.EndTime,
 		arg.Visibility,
+		arg.Column11,
 		arg.CreatedBy,
 		arg.MaxTeamSize,
 		arg.RequireApproval,
+		arg.ScaleScores,
 	)
 	var i Contest
 	err := row.Scan(
@@ -77,6 +82,7 @@ func (q *Queries) CreateContest(ctx context.Context, arg CreateContestParams) (C
 		&i.RequireApproval,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ScaleScores,
 	)
 	return i, err
 }
@@ -91,7 +97,7 @@ func (q *Queries) DeleteContest(ctx context.Context, id uuid.UUID) error {
 }
 
 const getContestByID = `-- name: GetContestByID :one
-SELECT id, slug, title, description, banner_url, status, entry_policy, registration_start, registration_end, start_time, end_time, visibility, rules_json, created_by, max_team_size, require_approval, created_at, updated_at FROM contests WHERE id = $1
+SELECT id, slug, title, description, banner_url, status, entry_policy, registration_start, registration_end, start_time, end_time, visibility, rules_json, created_by, max_team_size, require_approval, created_at, updated_at, scale_scores FROM contests WHERE id = $1
 `
 
 func (q *Queries) GetContestByID(ctx context.Context, id uuid.UUID) (Contest, error) {
@@ -116,12 +122,13 @@ func (q *Queries) GetContestByID(ctx context.Context, id uuid.UUID) (Contest, er
 		&i.RequireApproval,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ScaleScores,
 	)
 	return i, err
 }
 
 const getContestBySlug = `-- name: GetContestBySlug :one
-SELECT id, slug, title, description, banner_url, status, entry_policy, registration_start, registration_end, start_time, end_time, visibility, rules_json, created_by, max_team_size, require_approval, created_at, updated_at FROM contests WHERE slug = $1
+SELECT id, slug, title, description, banner_url, status, entry_policy, registration_start, registration_end, start_time, end_time, visibility, rules_json, created_by, max_team_size, require_approval, created_at, updated_at, scale_scores FROM contests WHERE slug = $1
 `
 
 func (q *Queries) GetContestBySlug(ctx context.Context, slug string) (Contest, error) {
@@ -146,12 +153,13 @@ func (q *Queries) GetContestBySlug(ctx context.Context, slug string) (Contest, e
 		&i.RequireApproval,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ScaleScores,
 	)
 	return i, err
 }
 
 const listContests = `-- name: ListContests :many
-SELECT id, slug, title, description, banner_url, status, entry_policy, registration_start, registration_end, start_time, end_time, visibility, rules_json, created_by, max_team_size, require_approval, created_at, updated_at FROM contests
+SELECT id, slug, title, description, banner_url, status, entry_policy, registration_start, registration_end, start_time, end_time, visibility, rules_json, created_by, max_team_size, require_approval, created_at, updated_at, scale_scores FROM contests
 WHERE ($3::contest_status IS NULL OR status = $3)
 ORDER BY start_time DESC
 LIMIT $1 OFFSET $2
@@ -191,6 +199,7 @@ func (q *Queries) ListContests(ctx context.Context, arg ListContestsParams) ([]C
 			&i.RequireApproval,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ScaleScores,
 		); err != nil {
 			return nil, err
 		}
@@ -213,12 +222,13 @@ UPDATE contests SET
   start_time = COALESCE($8, start_time),
   end_time = COALESCE($9, end_time),
   visibility = COALESCE($10::contest_visibility, visibility),
-  rules_json = COALESCE($11::jsonb, rules_json),
+  rules_json = COALESCE($11::varchar::jsonb, rules_json),
   max_team_size = COALESCE($12, max_team_size),
   require_approval = COALESCE($13, require_approval),
+  scale_scores = COALESCE($14, scale_scores),
   updated_at = now()
 WHERE id = $1
-RETURNING id, slug, title, description, banner_url, status, entry_policy, registration_start, registration_end, start_time, end_time, visibility, rules_json, created_by, max_team_size, require_approval, created_at, updated_at
+RETURNING id, slug, title, description, banner_url, status, entry_policy, registration_start, registration_end, start_time, end_time, visibility, rules_json, created_by, max_team_size, require_approval, created_at, updated_at, scale_scores
 `
 
 type UpdateContestParams struct {
@@ -232,9 +242,10 @@ type UpdateContestParams struct {
 	StartTime         pgtype.Timestamptz  `json:"start_time"`
 	EndTime           pgtype.Timestamptz  `json:"end_time"`
 	Visibility        *ContestVisibility  `json:"visibility"`
-	RulesJson         []byte              `json:"rules_json"`
+	RulesJson         *string             `json:"rules_json"`
 	MaxTeamSize       *int32              `json:"max_team_size"`
 	RequireApproval   *bool               `json:"require_approval"`
+	ScaleScores       *bool               `json:"scale_scores"`
 }
 
 func (q *Queries) UpdateContest(ctx context.Context, arg UpdateContestParams) (Contest, error) {
@@ -252,6 +263,7 @@ func (q *Queries) UpdateContest(ctx context.Context, arg UpdateContestParams) (C
 		arg.RulesJson,
 		arg.MaxTeamSize,
 		arg.RequireApproval,
+		arg.ScaleScores,
 	)
 	var i Contest
 	err := row.Scan(
@@ -273,12 +285,13 @@ func (q *Queries) UpdateContest(ctx context.Context, arg UpdateContestParams) (C
 		&i.RequireApproval,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ScaleScores,
 	)
 	return i, err
 }
 
 const updateContestStatus = `-- name: UpdateContestStatus :one
-UPDATE contests SET status = $2, updated_at = now() WHERE id = $1 RETURNING id, slug, title, description, banner_url, status, entry_policy, registration_start, registration_end, start_time, end_time, visibility, rules_json, created_by, max_team_size, require_approval, created_at, updated_at
+UPDATE contests SET status = $2, updated_at = now() WHERE id = $1 RETURNING id, slug, title, description, banner_url, status, entry_policy, registration_start, registration_end, start_time, end_time, visibility, rules_json, created_by, max_team_size, require_approval, created_at, updated_at, scale_scores
 `
 
 type UpdateContestStatusParams struct {
@@ -308,6 +321,7 @@ func (q *Queries) UpdateContestStatus(ctx context.Context, arg UpdateContestStat
 		&i.RequireApproval,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ScaleScores,
 	)
 	return i, err
 }

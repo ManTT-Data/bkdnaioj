@@ -48,3 +48,21 @@ func (p *Producer) EnqueueJudge(ctx context.Context, submissionID uuid.UUID, tra
 		Values: map[string]any{"payload": string(payload)},
 	}).Err()
 }
+
+func (p *Producer) EnqueueResult(ctx context.Context, submissionID uuid.UUID, typ string) error {
+	if p == nil || p.rdb == nil {
+		return fmt.Errorf("redis not configured")
+	}
+	env := ResultEnvelope{SubmissionID: submissionID, Type: typ}
+	payload, err := json.Marshal(env)
+	if err != nil {
+		return fmt.Errorf("marshal result envelope: %w", err)
+	}
+	return p.rdb.XAdd(ctx, &redis.XAddArgs{
+		Stream: StreamJobsResults,
+		MaxLen: 100_000,
+		Approx: true,
+		Values: map[string]any{"payload": string(payload)},
+	}).Err()
+}
+

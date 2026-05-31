@@ -1,0 +1,11 @@
+{
+  "submission_type": "precomputed_adversarial_images",
+  "dataset": "private",
+  "image_format": "png",
+  "cases": [
+    "priv_101",
+    "priv_102",
+    "priv_103",
+    "priv_104"
+  ]
+}

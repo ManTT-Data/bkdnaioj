@@ -1,0 +1,10 @@
+{
+  "source_zip": "/Users/quangsang/Downloads/NLP/dataset.zip",
+  "train_pairs_total": 32061,
+  "train_pairs_in_training_asset": 31821,
+  "public_eval_pairs": 120,
+  "private_eval_pairs": 120,
+  "official_public_unlabeled_lines": 1781,
+  "official_private_unlabeled_lines": 1781,
+  "note": "Downloaded dataset.zip does not include public/private reference translations, so runnable ground_truth assets are created from heldout real train pairs."
+}

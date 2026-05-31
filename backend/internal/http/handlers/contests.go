@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
@@ -20,6 +21,15 @@ import (
 type ContestHandler struct {
 	q   db.Querier
 	val *validator.Validate
+}
+
+type publishReadinessSchema struct {
+	TaskAssets struct {
+		RequiredAssets []string `json:"required_assets"`
+	} `json:"task_assets"`
+	Evaluation struct {
+		RequiredAssets []string `json:"required_assets"`
+	} `json:"evaluation"`
 }
 
 func NewContestHandler(q db.Querier) *ContestHandler {
@@ -37,10 +47,14 @@ func (h *ContestHandler) Create(c echo.Context) error {
 	}
 
 	uid := mw.GetUserID(c)
+	rulesJSON := json.RawMessage("{}")
 	if req.RulesJSON != nil {
 		raw := bytes.TrimSpace(*req.RulesJSON)
-		if len(raw) > 0 && string(raw) != "null" && !json.Valid(raw) {
-			return mw.ErrBadRequest("rules_json must be valid JSON")
+		if len(raw) > 0 && string(raw) != "null" {
+			if !json.Valid(raw) {
+				return mw.ErrBadRequest("rules_json must be valid JSON")
+			}
+			rulesJSON = json.RawMessage(raw)
 		}
 	}
 
@@ -55,9 +69,11 @@ func (h *ContestHandler) Create(c echo.Context) error {
 		StartTime:         dto.ToPgTimestamptzVal(req.StartTime),
 		EndTime:           dto.ToPgTimestamptzVal(req.EndTime),
 		Visibility:        db.ContestVisibility(req.Visibility),
+		Column11:          string(rulesJSON),
 		CreatedBy:         dto.ToPgUUID(uid),
 		MaxTeamSize:       req.MaxTeamSize,
 		RequireApproval:   req.RequireApproval,
+		ScaleScores:       req.ScaleScores,
 	})
 	if err != nil {
 		c.Logger().Errorf("create contest failed: %v", err)
@@ -130,17 +146,17 @@ func (h *ContestHandler) Update(c echo.Context) error {
 		return mw.ErrBadRequest(err.Error())
 	}
 
-	var rulesJSON json.RawMessage
+	var rulesJSON *string
 	if req.RulesJSON != nil {
 		raw := bytes.TrimSpace(*req.RulesJSON)
-		if len(raw) == 0 || string(raw) == "null" {
-			rulesJSON = json.RawMessage("{}")
-		} else {
+		value := "{}"
+		if len(raw) > 0 && string(raw) != "null" {
 			if !json.Valid(raw) {
 				return mw.ErrBadRequest("rules_json must be valid JSON")
 			}
-			rulesJSON = json.RawMessage(raw)
+			value = string(raw)
 		}
+		rulesJSON = &value
 	}
 
 	var ep *db.ContestEntryPolicy
@@ -168,6 +184,7 @@ func (h *ContestHandler) Update(c echo.Context) error {
 		RulesJson:         rulesJSON,
 		MaxTeamSize:       req.MaxTeamSize,
 		RequireApproval:   req.RequireApproval,
+		ScaleScores:       req.ScaleScores,
 	})
 	if err != nil {
 		c.Logger().Errorf("update contest failed: %v", err)
@@ -193,6 +210,13 @@ func (h *ContestHandler) Delete(c echo.Context) error {
 
 // POST /api/v1/contests/:id/publish
 func (h *ContestHandler) Publish(c echo.Context) error {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return mw.ErrBadRequest("invalid contest id")
+	}
+	if err := h.ensurePublishReady(c, id); err != nil {
+		return err
+	}
 	return h.setStatus(c, db.ContestStatusRegistrationOpen)
 }
 
@@ -214,4 +238,89 @@ func (h *ContestHandler) setStatus(c echo.Context, s db.ContestStatus) error {
 		return mw.ErrInternal("status update failed")
 	}
 	return c.JSON(http.StatusOK, dto.ContestToResponse(contest))
+}
+
+func (h *ContestHandler) ensurePublishReady(c echo.Context, contestID uuid.UUID) error {
+	ctx := c.Request().Context()
+	tasks, err := h.q.ListTasksByContest(ctx, contestID)
+	if err != nil {
+		return mw.ErrInternal("check contest tasks failed")
+	}
+	if len(tasks) == 0 {
+		return mw.ErrBadRequest("contest is not ready to publish: create at least one task")
+	}
+
+	var missing []string
+	for _, task := range tasks {
+		taskRequired, evalRequired := publishRequiredAssets(task.SubmissionSchema)
+
+		taskAssets, err := h.q.ListTaskAssets(ctx, task.ID)
+		if err != nil {
+			return mw.ErrInternal("check task assets failed")
+		}
+		taskAssetKeys := makeStringSetFromTaskAssets(taskAssets)
+		for _, key := range taskRequired {
+			if !taskAssetKeys[key] {
+				missing = append(missing, "task "+task.Slug+" missing task asset "+key)
+			}
+		}
+
+		evaluationSets, err := h.q.ListEvaluationSetsByTask(ctx, task.ID)
+		if err != nil {
+			return mw.ErrInternal("check evaluation sets failed")
+		}
+		if len(evaluationSets) == 0 {
+			missing = append(missing, "task "+task.Slug+" missing evaluation sets")
+			continue
+		}
+		for _, set := range evaluationSets {
+			assets, err := h.q.ListEvaluationSetAssets(ctx, set.ID)
+			if err != nil {
+				return mw.ErrInternal("check evaluation assets failed")
+			}
+			assetKeys := makeStringSetFromEvaluationAssets(assets)
+			for _, key := range evalRequired {
+				if !assetKeys[key] {
+					missing = append(missing, "task "+task.Slug+" "+string(set.Key)+" set missing asset "+key)
+				}
+			}
+		}
+	}
+
+	if len(missing) > 0 {
+		return mw.ErrBadRequest("contest is not ready to publish: " + strings.Join(missing, "; "))
+	}
+	return nil
+}
+
+func publishRequiredAssets(raw []byte) ([]string, []string) {
+	taskRequired := []string{"judge.py"}
+	evalRequired := []string{"ground_truth", "inputs"}
+	var schema publishReadinessSchema
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return taskRequired, evalRequired
+	}
+	if len(schema.TaskAssets.RequiredAssets) > 0 {
+		taskRequired = schema.TaskAssets.RequiredAssets
+	}
+	if len(schema.Evaluation.RequiredAssets) > 0 {
+		evalRequired = schema.Evaluation.RequiredAssets
+	}
+	return taskRequired, evalRequired
+}
+
+func makeStringSetFromTaskAssets(assets []db.TaskAsset) map[string]bool {
+	out := make(map[string]bool, len(assets))
+	for _, a := range assets {
+		out[a.AssetKey] = true
+	}
+	return out
+}
+
+func makeStringSetFromEvaluationAssets(assets []db.EvaluationSetAsset) map[string]bool {
+	out := make(map[string]bool, len(assets))
+	for _, a := range assets {
+		out[a.AssetKey] = true
+	}
+	return out
 }

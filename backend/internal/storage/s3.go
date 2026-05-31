@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"strings"
 	"time"
@@ -98,3 +99,15 @@ func (s *S3) PresignPut(ctx context.Context, objectKey string, expiry time.Durat
 func (s *S3) Download(ctx context.Context, objectKey, destPath string) error {
 	return s.internal.FGetObject(ctx, s.bucket, objectKey, destPath, minio.GetObjectOptions{})
 }
+
+func (s *S3) Upload(ctx context.Context, objectKey string, reader io.Reader, size int64, contentType string) error {
+	_, err := s.internal.PutObject(ctx, s.bucket, objectKey, reader, size, minio.PutObjectOptions{
+		ContentType: contentType,
+	})
+	return err
+}
+
+func (s *S3) Get(ctx context.Context, objectKey string) (io.ReadCloser, error) {
+	return s.internal.GetObject(ctx, s.bucket, objectKey, minio.GetObjectOptions{})
+}
+

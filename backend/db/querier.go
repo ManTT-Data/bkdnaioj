@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
@@ -18,6 +19,7 @@ type Querier interface {
 	CountActiveEntries(ctx context.Context) (int64, error)
 	CountContests(ctx context.Context) (int64, error)
 	CountSubmissions(ctx context.Context) (int64, error)
+	CountTasks(ctx context.Context) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	// Announcements
 	CreateAnnouncement(ctx context.Context, arg CreateAnnouncementParams) (Announcement, error)
@@ -58,11 +60,12 @@ type Querier interface {
 	GetTaskByID(ctx context.Context, id uuid.UUID) (Task, error)
 	// Task-phase leaderboard
 	GetTaskPhaseLeaderboard(ctx context.Context, arg GetTaskPhaseLeaderboardParams) ([]GetTaskPhaseLeaderboardRow, error)
+	GetTaskSubmissionStats(ctx context.Context) ([]GetTaskSubmissionStatsRow, error)
 	GetTeamByID(ctx context.Context, id uuid.UUID) (Team, error)
 	GetTeamBySlug(ctx context.Context, slug string) (Team, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
-	ListAnnouncementsByContest(ctx context.Context, contestID uuid.UUID) ([]Announcement, error)
+	ListAnnouncementsByContest(ctx context.Context, contestID pgtype.UUID) ([]Announcement, error)
 	ListClarificationsByContest(ctx context.Context, arg ListClarificationsByContestParams) ([]Clarification, error)
 	ListContestEntries(ctx context.Context, arg ListContestEntriesParams) ([]ContestEntry, error)
 	ListContests(ctx context.Context, arg ListContestsParams) ([]Contest, error)
@@ -73,6 +76,8 @@ type Querier interface {
 	ListPhasesByTask(ctx context.Context, taskID uuid.UUID) ([]Phase, error)
 	ListSubmissionFilesBySubmission(ctx context.Context, submissionID uuid.UUID) ([]SubmissionFile, error)
 	ListSubmissionsByEntry(ctx context.Context, arg ListSubmissionsByEntryParams) ([]Submission, error)
+	ListSystemAnnouncements(ctx context.Context) ([]Announcement, error)
+	ListTaskAssets(ctx context.Context, taskID uuid.UUID) ([]TaskAsset, error)
 	ListTasksByContest(ctx context.Context, contestID uuid.UUID) ([]Task, error)
 	ListTeamMembers(ctx context.Context, teamID uuid.UUID) ([]ListTeamMembersRow, error)
 	ListTeamsByUser(ctx context.Context, userID uuid.UUID) ([]Team, error)
@@ -81,8 +86,11 @@ type Querier interface {
 	ListUsersAdmin(ctx context.Context, arg ListUsersAdminParams) ([]ListUsersAdminRow, error)
 	MarkSubmissionFinal(ctx context.Context, id uuid.UUID) (Submission, error)
 	MarkSubmissionQueued(ctx context.Context, arg MarkSubmissionQueuedParams) (Submission, error)
+	RecomputeContestPhaseLeaderboard(ctx context.Context, arg RecomputeContestPhaseLeaderboardParams) error
+	RecomputeTaskPhaseLeaderboard(ctx context.Context, arg RecomputeTaskPhaseLeaderboardParams) error
 	RemoveEntryMember(ctx context.Context, arg RemoveEntryMemberParams) error
 	RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error
+	ResetOtherFinalSubmissions(ctx context.Context, arg ResetOtherFinalSubmissionsParams) error
 	ResolveTicket(ctx context.Context, id uuid.UUID) (Ticket, error)
 	SetPhaseFrozen(ctx context.Context, arg SetPhaseFrozenParams) (Phase, error)
 	TouchUserLastVisit(ctx context.Context, id uuid.UUID) error
@@ -99,6 +107,7 @@ type Querier interface {
 	UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) (UpdateUserRoleRow, error)
 	UpsertContestPhaseLeaderboard(ctx context.Context, arg UpsertContestPhaseLeaderboardParams) (ContestPhaseLeaderboardEntry, error)
 	UpsertEvaluationSetAsset(ctx context.Context, arg UpsertEvaluationSetAssetParams) (EvaluationSetAsset, error)
+	UpsertTaskAsset(ctx context.Context, arg UpsertTaskAssetParams) (TaskAsset, error)
 	UpsertTaskPhaseLeaderboard(ctx context.Context, arg UpsertTaskPhaseLeaderboardParams) (TaskPhaseLeaderboardEntry, error)
 }
 

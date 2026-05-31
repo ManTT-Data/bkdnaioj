@@ -51,7 +51,7 @@ func NewRouter(d *Deps) *echo.Echo {
 	registerTeams(api, q, d.JWTMgr)
 	registerContests(api, q, d.JWTMgr)
 	registerPhaseDefs(api, q, d.JWTMgr)
-	registerTasks(api, q, d.JWTMgr)
+	registerTasks(api, q, d.JWTMgr, d.Storage)
 	registerEvaluationSets(api, q, d.JWTMgr, d.Storage)
 	registerPhases(api, q, d.JWTMgr, d.Storage)
 	registerEntries(api, q, d.JWTMgr)
@@ -60,6 +60,7 @@ func NewRouter(d *Deps) *echo.Echo {
 	registerClarifications(api, q, d.JWTMgr)
 	registerTickets(api, q, d.JWTMgr)
 	registerLeaderboards(api, q, d.JWTMgr)
+	registerStats(api, q)
 	registerAdmin(api, q, d.JWTMgr)
 
 	return e
@@ -115,23 +116,32 @@ func registerPhaseDefs(api *echo.Group, q *db.Queries, jwtMgr *security.JWTManag
 	admin.DELETE("/:def_id", h.Delete)
 }
 
-func registerTasks(api *echo.Group, q *db.Queries, jwtMgr *security.JWTManager) {
-	h := handlers.NewTaskHandler(q)
+func registerTasks(api *echo.Group, q *db.Queries, jwtMgr *security.JWTManager, s3 *storage.S3) {
+	h := handlers.NewTaskHandler(q, jwtMgr, s3)
 	api.GET("/contests/:id/tasks", h.ListByContest)
 	api.GET("/tasks/:id", h.Get)
+	api.GET("/tasks/:id/statement", h.GetStatement)
 	admin := api.Group("", mw.JWTAuth(jwtMgr), mw.RequireRole("admin"))
 	admin.POST("/contests/:id/tasks", h.Create)
+	admin.PATCH("/tasks/:id", h.Update)
 	admin.DELETE("/tasks/:id", h.Delete)
+
+	// Support both admin and jury to upload the task statement
+	staff := api.Group("", mw.JWTAuth(jwtMgr), mw.RequireRole("admin", "jury"))
+	staff.POST("/tasks/:id/statement", h.UploadStatement)
 }
 
 func registerEvaluationSets(api *echo.Group, q *db.Queries, jwtMgr *security.JWTManager, s3 *storage.S3) {
 	h := handlers.NewEvaluationSetHandler(q, s3)
 	api.GET("/tasks/:task_id/evaluation-sets", h.ListByTask)
+	api.GET("/tasks/:task_id/assets", h.ListTaskAssets)
 	api.GET("/evaluation-sets/:id", h.Get)
 	api.GET("/evaluation-sets/:id/assets", h.ListAssets)
 	admin := api.Group("", mw.JWTAuth(jwtMgr), mw.RequireRole("admin"))
 	admin.POST("/tasks/:task_id/evaluation-sets", h.Create)
 	jury := api.Group("", mw.JWTAuth(jwtMgr), mw.RequireRole("admin", "jury"))
+	jury.POST("/tasks/:task_id/assets:initiate", h.InitiateTaskAssets)
+	jury.POST("/tasks/:task_id/assets/complete", h.CompleteTaskAssets)
 	jury.POST("/evaluation-sets/:id/assets:initiate", h.InitiateAssets)
 	jury.POST("/evaluation-sets/:id/assets/complete", h.CompleteAssets)
 }
@@ -143,6 +153,7 @@ func registerPhases(api *echo.Group, q *db.Queries, jwtMgr *security.JWTManager,
 	admin := api.Group("", mw.JWTAuth(jwtMgr), mw.RequireRole("admin"))
 	admin.POST("/tasks/:id/phases", h.Create)
 	admin.DELETE("/phases/:id", h.Delete)
+	admin.PATCH("/phases/:id", h.Update)
 	jury := api.Group("", mw.JWTAuth(jwtMgr), mw.RequireRole("admin", "jury"))
 	jury.POST("/phases/:id/freeze", h.Freeze)
 	jury.POST("/phases/:id/unfreeze", h.Unfreeze)
@@ -164,4 +175,11 @@ func registerEntries(api *echo.Group, q *db.Queries, jwtMgr *security.JWTManager
 	jury := api.Group("", auth, mw.RequireRole("admin", "jury"))
 	jury.POST("/entries/:id/approve", eh.Approve)
 	jury.POST("/entries/:id/disqualify", eh.Disqualify)
+}
+
+func registerStats(api *echo.Group, q *db.Queries) {
+	h := handlers.NewStatsHandler(q)
+	stats := api.Group("/stats")
+	stats.GET("/summary", h.Summary)
+	stats.GET("/tasks", h.TaskStats)
 }

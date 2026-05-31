@@ -58,10 +58,55 @@ func (h *PhaseDefHandler) List(c echo.Context) error {
 	if err != nil {
 		return mw.ErrBadRequest("invalid contest id")
 	}
-	defs, err := h.q.ListPhaseDefsByContest(c.Request().Context(), contestID)
+	ctx := c.Request().Context()
+	defs, err := h.q.ListPhaseDefsByContest(ctx, contestID)
 	if err != nil {
 		return mw.ErrInternal("list phase defs failed")
 	}
+
+	// Contest phase defs are an invariant (4 standard keys). Auto-seed missing defs to avoid a manual admin step.
+	present := map[db.ContestPhaseKey]bool{}
+	for _, d := range defs {
+		present[d.Key] = true
+	}
+	standard := []struct {
+		key       db.ContestPhaseKey
+		title     string
+		sortOrder int32
+	}{
+		{key: db.ContestPhaseKeyPublicTest, title: "Public Test", sortOrder: 1},
+		{key: db.ContestPhaseKeyPrivateTest, title: "Private Test", sortOrder: 2},
+		{key: db.ContestPhaseKeyFinalPublic, title: "Final Public", sortOrder: 3},
+		{key: db.ContestPhaseKeyFinalPrivate, title: "Final Private", sortOrder: 4},
+	}
+	seeded := false
+	for _, s := range standard {
+		if present[s.key] {
+			continue
+		}
+		_, err := h.q.CreatePhaseDef(ctx, db.CreatePhaseDefParams{
+			ContestID: contestID,
+			Key:       s.key,
+			Title:     s.title,
+			SortOrder: s.sortOrder,
+		})
+		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				// Created by another request concurrently.
+				continue
+			}
+			return mw.ErrInternal("seed phase defs failed")
+		}
+		seeded = true
+	}
+	if seeded {
+		defs, err = h.q.ListPhaseDefsByContest(ctx, contestID)
+		if err != nil {
+			return mw.ErrInternal("list phase defs failed")
+		}
+	}
+
 	resp := make([]dto.PhaseDefResponse, len(defs))
 	for i, d := range defs {
 		resp[i] = dto.PhaseDefToResponse(d)

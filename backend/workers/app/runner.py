@@ -3,35 +3,120 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import tempfile
 
 
 class PhaseRunner:
-    def run_public(self, *, judge: str, pred: str, gt: str) -> dict:
-        return self._run_judge(judge=judge, pred=pred, gt=gt)
+    def run_non_final(self, *, judge: str, submission_dir: str, assets_dir: str, output_dir: str, context_path: str) -> dict:
+        return self._run_judge(
+            judge=judge,
+            submission_dir=submission_dir,
+            assets_dir=assets_dir,
+            output_dir=output_dir,
+            context_path=context_path,
+        )
 
-    def run_final(self, *, judge: str, submission_zip: str, inputs_dir: str, gt: str) -> dict:
-        with tempfile.TemporaryDirectory(prefix="olpai-final-") as td:
-            sub_dir = os.path.join(td, "sub")
-            out_dir = os.path.join(td, "out")
-            os.makedirs(sub_dir, exist_ok=True)
-            os.makedirs(out_dir, exist_ok=True)
+    def run_final(
+        self,
+        *,
+        inference_entrypoint: str,
+        judge: str,
+        submission_dir: str,
+        assets_dir: str,
+        generated_dir: str,
+        output_dir: str,
+        context_path: str,
+    ) -> dict:
+        os.makedirs(generated_dir, exist_ok=True)
+        is_docker_env = os.path.isdir("/app/shared-temp") and os.path.exists("/var/run/docker.sock")
+        if is_docker_env:
+            import docker
+            client = docker.from_env()
+            timeout = int(os.getenv("SANDBOX_TIMEOUT_S", "300"))
+            image_name = "python:3.11-slim"
+            try:
+                client.images.get(image_name)
+            except docker.errors.ImageNotFound:
+                client.images.pull("python", tag="3.11-slim")
 
-            subprocess.run(["python", "-m", "zipfile", "-e", submission_zip, sub_dir], check=True)
-
-            infer = os.path.join(sub_dir, "infer.py")
-            model = os.path.join(sub_dir, "model.txt")
+            volume_name = os.getenv("SHARED_TEMP_VOLUME_NAME", "olpai_shared_temp")
+            container = client.containers.create(
+                image=image_name,
+                command=[
+                    "python",
+                    inference_entrypoint,
+                    "--submission-dir", submission_dir,
+                    "--assets-dir", assets_dir,
+                    "--output-dir", generated_dir,
+                    "--context", context_path,
+                ],
+                volumes={volume_name: {"bind": "/app/shared-temp", "mode": "rw"}},
+                network_mode="none",
+                mem_limit="512m",
+                nano_cpus=1000000000,
+            )
+            container.start()
+            try:
+                result = container.wait(timeout=timeout)
+                exit_code = result.get("StatusCode", 0)
+                if exit_code != 0:
+                    logs = container.logs().decode("utf-8")
+                    raise RuntimeError(f"Sandbox container failed (exit {exit_code}): {logs}")
+            except Exception as e:
+                try:
+                    container.kill()
+                except Exception:
+                    pass
+                raise RuntimeError(f"Sandbox execution failed or timed out: {str(e)}") from e
+            finally:
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass
+        else:
             subprocess.run(
-                ["python", infer, "--input", inputs_dir, "--output", out_dir, "--model", model],
+                [
+                    "python",
+                    inference_entrypoint,
+                    "--submission-dir",
+                    submission_dir,
+                    "--assets-dir",
+                    assets_dir,
+                    "--output-dir",
+                    generated_dir,
+                    "--context",
+                    context_path,
+                ],
                 check=True,
                 timeout=int(os.getenv("SANDBOX_TIMEOUT_S", "300")),
             )
+        return self._run_judge(
+            judge=judge,
+            submission_dir=generated_dir,
+            assets_dir=assets_dir,
+            output_dir=output_dir,
+            context_path=context_path,
+        )
 
-            pred = os.path.join(out_dir, "predictions.csv")
-            return self._run_judge(judge=judge, pred=pred, gt=gt)
-
-    def _run_judge(self, *, judge: str, pred: str, gt: str) -> dict:
-        p = subprocess.run(["python", judge, "--pred", pred, "--gt", gt], capture_output=True, text=True, check=True)
+    def _run_judge(self, *, judge: str, submission_dir: str, assets_dir: str, output_dir: str, context_path: str) -> dict:
+        os.makedirs(output_dir, exist_ok=True)
+        p = subprocess.run(
+            [
+                "python",
+                judge,
+                "--submission-dir",
+                submission_dir,
+                "--assets-dir",
+                assets_dir,
+                "--output-dir",
+                output_dir,
+                "--context",
+                context_path,
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=int(os.getenv("SANDBOX_TIMEOUT_S", "300")),
+        )
         out = json.loads(p.stdout.strip())
         if out.get("status") != "success":
             raise RuntimeError(out.get("message") or "judge failed")

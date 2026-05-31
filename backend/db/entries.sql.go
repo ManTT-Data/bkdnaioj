@@ -68,7 +68,7 @@ const createContestEntry = `-- name: CreateContestEntry :one
 INSERT INTO contest_entries (
   contest_id, entry_type, entry_mode, user_id, team_id,
   display_name, status, registered_by, start_at, end_at
-) VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING id, contest_id, entry_type, entry_mode, user_id, team_id, display_name, status, registered_by, approved_by, approved_at, start_at, end_at, created_at, updated_at
 `
 
@@ -79,6 +79,7 @@ type CreateContestEntryParams struct {
 	UserID       pgtype.UUID        `json:"user_id"`
 	TeamID       pgtype.UUID        `json:"team_id"`
 	DisplayName  string             `json:"display_name"`
+	Status       EntryStatus        `json:"status"`
 	RegisteredBy uuid.UUID          `json:"registered_by"`
 	StartAt      pgtype.Timestamptz `json:"start_at"`
 	EndAt        pgtype.Timestamptz `json:"end_at"`
@@ -92,6 +93,7 @@ func (q *Queries) CreateContestEntry(ctx context.Context, arg CreateContestEntry
 		arg.UserID,
 		arg.TeamID,
 		arg.DisplayName,
+		arg.Status,
 		arg.RegisteredBy,
 		arg.StartAt,
 		arg.EndAt,

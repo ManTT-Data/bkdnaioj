@@ -1,0 +1,58 @@
+{
+  "dataset": "public",
+  "metric": "targeted_attack_success_rate",
+  "labels": [
+    "blue",
+    "green",
+    "red",
+    "yellow"
+  ],
+  "patch_box_xyxy": [
+    48,
+    48,
+    64,
+    64
+  ],
+  "cases": [
+    {
+      "id": "pub_001",
+      "target_label": "blue",
+      "expected_patch_rgb": [
+        37,
+        99,
+        235
+      ],
+      "expected_sha256": "c252db09b1f57b5054ef0f2a0734619075fe0a74154e3c3fafd4d343b2ef4361"
+    },
+    {
+      "id": "pub_002",
+      "target_label": "yellow",
+      "expected_patch_rgb": [
+        234,
+        179,
+        8
+      ],
+      "expected_sha256": "4fe7662ad20b063165fe482199ac9dc7cad3e8c5f4be164f15e8741c279385bf"
+    },
+    {
+      "id": "pub_003",
+      "target_label": "red",
+      "expected_patch_rgb": [
+        220,
+        38,
+        38
+      ],
+      "expected_sha256": "de8f1eecf9730a15e433e9ac2a5e343a08f6c7be8eefaa91384b645a9581abb5"
+    },
+    {
+      "id": "pub_004",
+      "target_label": "green",
+      "expected_patch_rgb": [
+        22,
+        163,
+        74
+      ],
+      "expected_sha256": "b294a816accf3aef7380c71b57fc7b41330a5fd61dff6590b3f9317d86937671"
+    }
+  ]
+}

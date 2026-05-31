@@ -1033,7 +1033,7 @@ func (e UserRole) Valid() bool {
 
 type Announcement struct {
 	ID        uuid.UUID          `json:"id"`
-	ContestID uuid.UUID          `json:"contest_id"`
+	ContestID pgtype.UUID        `json:"contest_id"`
 	TaskID    pgtype.UUID        `json:"task_id"`
 	Title     string             `json:"title"`
 	Content   string             `json:"content"`
@@ -1080,6 +1080,7 @@ type Contest struct {
 	RequireApproval   bool               `json:"require_approval"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ScaleScores       bool               `json:"scale_scores"`
 }
 
 type ContestEntry struct {
@@ -1128,6 +1129,7 @@ type ContestPhaseLeaderboardEntry struct {
 	IsDisqualified    bool               `json:"is_disqualified"`
 	DqReason          *string            `json:"dq_reason"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	RawScore          string             `json:"raw_score"`
 }
 
 type EvaluationJob struct {
@@ -1236,6 +1238,20 @@ type Task struct {
 	SortOrder           int32              `json:"sort_order"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	DatasetUrl          *string            `json:"dataset_url"`
+}
+
+type TaskAsset struct {
+	ID               uuid.UUID          `json:"id"`
+	TaskID           uuid.UUID          `json:"task_id"`
+	AssetKey         string             `json:"asset_key"`
+	OriginalFilename string             `json:"original_filename"`
+	StoragePath      string             `json:"storage_path"`
+	FileSize         int64              `json:"file_size"`
+	ContentType      *string            `json:"content_type"`
+	HashSha256       *string            `json:"hash_sha256"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 type TaskEvaluationSet struct {
@@ -1263,6 +1279,7 @@ type TaskPhaseLeaderboardEntry struct {
 	IsDisqualified     bool               `json:"is_disqualified"`
 	DqReason           *string            `json:"dq_reason"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	RawScore           string             `json:"raw_score"`
 }
 
 type Team struct {

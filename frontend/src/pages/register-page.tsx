@@ -1,84 +1,120 @@
-// RegisterPage — full_name/email/password form wired to POST /api/v1/auth/register
-// Stores JWT in AuthContext + localStorage, redirects to / on success
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import type { FormEvent } from 'react'
-import axios from 'axios'
-import { Button } from '@/components/ui/button'
-import { useAuth } from '@/contexts/auth-context'
-import { authApi } from '@/lib/api/auth-api-login-register-me'
+import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/auth-context';
+import { UserPlus, AlertCircle, CheckCircle } from 'lucide-react';
 
-export function RegisterPage() {
-  const { login } = useAuth()
-  const navigate = useNavigate()
+export const RegisterPage: React.FC = () => {
+  const { register } = useAuth();
+  const navigate = useNavigate();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [studentId, setStudentId] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const [fullName, setFullName] = useState('')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    setError(null)
-    setLoading(true)
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+    setSubmitting(true);
     try {
-      const { token, user } = await authApi.register({ full_name: fullName, email, password })
-      login(token, user)
-      navigate('/')
-    } catch (err) {
-      if (axios.isAxiosError<{ message?: string }>(err)) {
-        setError(err.response?.data?.message ?? 'Registration failed. Please check name/email and try again.')
-      } else {
-        setError('Registration failed. Please check name/email and try again.')
-      }
+      await register({
+        email,
+        password,
+        full_name: fullName,
+        student_id: studentId || undefined,
+      });
+      setSuccess('Account created successfully! Redirecting to login...');
+      setTimeout(() => {
+        navigate('/login');
+      }, 2000);
+    } catch (err: any) {
+      setError(err?.response?.data?.message || 'Registration failed. Try a different email.');
     } finally {
-      setLoading(false)
+      setSubmitting(false);
     }
-  }
-
-  const inputCls =
-    'bg-surface-container-lowest border border-outline-variant rounded px-md py-sm text-sm text-on-surface placeholder:text-outline focus:outline-none focus:border-primary transition-colors'
+  };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center px-md">
-      <div className="bg-surface-container border border-outline-variant rounded-xl p-xl w-full max-w-sm">
-        <h2 className="text-xl font-bold text-on-surface mb-lg">Create Account</h2>
-        <form className="flex flex-col gap-md" onSubmit={handleSubmit}>
-          <input
-            type="text"
-            placeholder="Full name"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            required
-            className={inputCls}
-          />
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            className={inputCls}
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            className={inputCls}
-          />
-          {error && <p className="text-xs text-error">{error}</p>}
-          <Button variant="primary" size="md" className="w-full" disabled={loading}>
-            {loading ? 'Creating…' : 'Create Account'}
-          </Button>
+    <div className="auth-wrapper">
+      <div className="auth-card">
+        <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem' }}>
+          <UserPlus size={24} /> Create Account
+        </h2>
+
+        {error && (
+          <div className="alert alert-danger flex items-center gap-2">
+            <AlertCircle size={18} />
+            <div>{error}</div>
+          </div>
+        )}
+
+        {success && (
+          <div className="alert alert-success flex items-center gap-2">
+            <CheckCircle size={18} />
+            <div>{success}</div>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label className="form-label">Full Name</label>
+            <input
+              type="text"
+              className="form-input"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              required
+              placeholder="e.g. Nguyen Van A"
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Student ID (Optional)</label>
+            <input
+              type="text"
+              className="form-input"
+              value={studentId}
+              onChange={(e) => setStudentId(e.target.value)}
+              placeholder="e.g. 20211234"
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Email Address</label>
+            <input
+              type="email"
+              className="form-input"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              placeholder="e.g. user@domain.com"
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Password (Min 8 characters)</label>
+            <input
+              type="password"
+              className="form-input"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              placeholder="••••••••"
+            />
+          </div>
+
+          <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1rem' }} disabled={submitting || !!success}>
+            {submitting ? 'Creating account...' : 'Register'}
+          </button>
         </form>
-        <p className="text-sm text-on-surface-variant mt-md text-center">
-          Already have an account?{' '}
-          <Link to="/login" className="text-primary hover:underline">Sign in</Link>
+
+        <p style={{ marginTop: '1.5rem', textAlign: 'center', fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+          Already have an account? <Link to="/login">Login here</Link>
         </p>
       </div>
     </div>
-  )
-}
+  );
+};

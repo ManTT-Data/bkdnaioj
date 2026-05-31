@@ -1,0 +1,4 @@
+{
+  "input_asset_key": "inputs",
+  "output_dir_name": "adversarial_images"
+}
